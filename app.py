@@ -1,5 +1,5 @@
 # TILISI GOLD BI v7.2 - QUANT ENGINE + MT5 DIRECT CONNECT
-# Tilisi Technologies Inc.™ - Sky Blue Edition
+# Tilisi Technologies Inc.™ - Sky Blue Edition - FIXED FOR APK
 import requests, json, time, random
 from datetime import datetime
 from flask import Flask, jsonify, render_template_string, send_from_directory
@@ -7,7 +7,6 @@ import os
 
 app = Flask(__name__)
 
-# --- CORE ENGINE (v7 - Cleaned & Tightened) ---
 def get_gold_price():
     try:
         r = requests.get('https://api.gold-api.com/price/XAU', timeout=8).json()
@@ -118,22 +117,38 @@ def v7_check_gates(gold_price=None, dxy_val=None):
         "levels": {"resistance":[4145,4135,4128],"pivot":4120.45,"support":[4115,4105,4092]}
     }
 
-# --- API ROUTES ---
 @app.route('/api/status')
 def api_status():
     return jsonify(v7_check_gates())
 
+# --- FIXED FOR PWA BUILDER ---
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
         "name": "Tilisi Gold",
         "short_name": "Tilisi Gold",
+        "description": "QUANTRADE TERMINAL XAUUSD - Professional Gold Trading Signals by Tilisi Technologies Inc.",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#0aa0ff",
         "theme_color": "#0aa0ff",
-        "icons": [{"src": "/icon", "sizes": "512x512", "type": "image/png"}]
+        "icons": [
+            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+        ]
     })
+
+@app.route('/icon-192.png')
+def icon192():
+    return send_from_directory('.', 'icon-192.png')
+
+@app.route('/icon-512.png')
+def icon512():
+    return send_from_directory('.', 'icon-512.png')
+
+@app.route('/sw.js')
+def sw():
+    return send_from_directory('.', 'sw.js')
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -157,22 +172,18 @@ body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding
 </head>
 <body>
 <h2 style="text-align:center">TILISI GOLD BI v7.2<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.™</small></h2>
-
 <div class="card">
 <div style="display:flex;justify-content:space-between"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
 <div style="display:flex;justify-content:space-between"><span>DXY</span><span id="dxy">--</span> <span>RSI <span id="rsi">--</span></span></div>
 <div id="signal" class="signal WAIT">WAIT</div>
 <div style="text-align:center">Confidence: <b id="conf">0%</b> | Regime: <b id="regime">--</b> | Risk: <b id="risk">--</b></div>
 <div style="text-align:center;font-size:11px;margin-top:10px;opacity:0.8" id="inv">--</div>
-
 <a class="mt5-btn" onclick="openMT5()">🚀 OPEN IN MT5 APP - TRADE XAUUSD</a>
 <a class="mt5-btn2" onclick="openMT5Chart()">📈 OPEN XAUUSD CHART IN MT5</a>
 <div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">If MT5 not installed, will redirect to Play Store</div>
 </div>
-
 <div class="card"><b>8 GATES ANALYSIS</b><div id="gates"></div></div>
 <div class="card"><b>AI ANALYST</b><div id="ai" style="font-size:13px;margin-top:8px"></div></div>
-
 <script>
 let lastData;
 async function refresh(){
@@ -191,22 +202,12 @@ async function refresh(){
   document.getElementById('gates').innerHTML=hg;
 }
 function openMT5(){
-  // Try to open MT5 app directly with XAUUSD
   let now = Date.now();
-  // Primary MT5 deep links
   window.location.href = "metatrader5://";
-  setTimeout(()=>{
-    if(Date.now()-now < 2500){ window.location.href="mt5://"; }
-  },500);
-  setTimeout(()=>{
-    // Fallback to Play Store if app not installed
-    if(Date.now()-now < 3500){
-      window.location.href="https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5";
-    }
-  },1500);
+  setTimeout(()=>{ if(Date.now()-now < 2500){ window.location.href="mt5://"; } },500);
+  setTimeout(()=>{ if(Date.now()-now < 3500){ window.location.href="https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5"; } },1500);
 }
 function openMT5Chart(){
-  // Opens MT5 with Gold symbol focus
   window.location.href = "https://trade.mql5.com/trade?servers=MetaQuotes-Demo&trade_server=MetaQuotes-Demo&demo_server=MetaQuotes-Demo&symbol=XAUUSD&action=chart";
   setTimeout(()=>{ window.location.href="metatrader5://"; },800);
 }
