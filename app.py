@@ -1,15 +1,17 @@
-# TILISI GOLD BI v7.3 - QUANT ENGINE + MT5 DIRECT CONNECT + ALERTS + FCM
-# Tilisi Technologies Inc.™ - Sky Blue Edition
+# TILISI GOLD BI v7.4 - QUANT ENGINE + MT5 DIRECT CONNECT + ALERTS + FCM
+# Tilisi Technologies Inc. - Fixed Alerts
 import requests, json, time, random, threading
 from datetime import datetime
-from flask import Flask, jsonify, render_template_string, send_from_directory, request
+from flask import Flask, jsonify, render_template_string, request
 import os
 
 app = Flask(__name__)
 
-# --- ALERT STORE (in-memory + file for persistence) ---
+# --- ALERT STORE ---
 ALERTS_FILE = "tilisi_alerts.json"
 alerts_db = []
+last_price_global = None
+
 if os.path.exists(ALERTS_FILE):
     try:
         alerts_db = json.load(open(ALERTS_FILE))
@@ -133,9 +135,8 @@ def v7_check_gates(gold_price=None, dxy_val=None):
         "levels": {"resistance":[4145,4135,4128],"pivot":4120.45,"support":[4115,4105,4092]}
     }
 
-# --- NEW: ALERT ENGINE + FCM DISPATCH ---
+# --- ALERT ENGINE + FCM DISPATCH - FIXED LOGIC ---
 def send_fcm_push(token, title, body):
-    # FCM v1 - weka SERVICE_ACCOUNT JSON kama env var FIREBASE_CRED
     try:
         import firebase_admin
         from firebase_admin import messaging, credentials
@@ -158,25 +159,38 @@ def send_fcm_push(token, title, body):
         return False
 
 def alert_checker_loop():
+    global last_price_global
     while True:
         try:
             price = get_gold_price()
+            if last_price_global is None:
+                last_price_global = price
+
             for alert in alerts_db[:]:
                 if not alert.get('active', True): continue
                 target = alert['target']
-                typ = alert['type'] # above / below
-                hit = (typ=='above' and price >= target) or (typ=='below' and price <= target)
+                typ = alert['type']
+                # FIXED LOGIC: Only trigger on actual cross
+                hit = False
+                if typ == 'above':
+                    if last_price_global < target <= price:
+                        hit = True
+                else: # below
+                    if last_price_global > target >= price:
+                        hit = True
+
                 if hit:
-                    # FCM push if token exists
                     if alert.get('fcmToken'):
-                        send_fcm_push(alert['fcmToken'], f"GOLD IMEFIKA {target}!", f"Sasa ni ${price}. Fungua Tilisi Gold!")
+                        send_fcm_push(alert['fcmToken'], f"GOLD ALERT {target}", f"Price is now ${price}")
                     alert['active'] = False
                     alert['triggeredPrice'] = price
                     alert['triggeredAt'] = datetime.utcnow().isoformat()
+            
+            last_price_global = price
             save_alerts()
         except Exception as e:
             print("alert loop", e)
-        time.sleep(30) # check every 30 sec
+        time.sleep(30)
 
 threading.Thread(target=alert_checker_loop, daemon=True).start()
 
@@ -244,7 +258,7 @@ body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding
 </style>
 </head>
 <body>
-<h2 style="text-align:center">TILISI GOLD BI v7.3<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.™ + ALERTS</small></h2>
+<h2 style="text-align:center">TILISI GOLD BI v7.4<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.</small></h2>
 
 <div class="card">
 <div style="display:flex;justify-content:space-between"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
@@ -253,18 +267,18 @@ body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding
 <div style="text-align:center">Confidence: <b id="conf">0%</b> | Regime: <b id="regime">--</b> | Risk: <b id="risk">--</b></div>
 <div style="text-align:center;font-size:11px;margin-top:10px;opacity:0.8" id="inv">--</div>
 
-<button class="mt5-btn" onclick="showAlertBox()" style="background:linear-gradient(90deg,#00ff88,#00cc66)">🔔 WEKA ALERT YA BEI (kama Exness)</button>
+<button class="mt5-btn" onclick="showAlertBox()" style="background:linear-gradient(90deg,#00ff88,#00cc66)">🔔 SET PRICE ALERT</button>
 <div id="alertBox" class="alert-card" style="display:none">
-  <b>Weka Alert</b><br>
-  <input id="alertPrice" type="number" placeholder="mfano 4070" style="width:60%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-top:8px">
-  <select id="alertType" style="padding:10px;border-radius:8px"><option value="above">Ikipanda juu ya</option><option value="below">Ikishuka chini ya</option></select>
+  <b>Set Price Alert</b><br>
+  <input id="alertPrice" type="number" placeholder="e.g. 4070" style="width:60%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-top:8px">
+  <select id="alertType" style="padding:10px;border-radius:8px"><option value="above">Price Above</option><option value="below">Price Below</option></select>
   <button onclick="saveAlert()" style="padding:10px 15px;background:#0aa0ff;color:#fff;border:none;border-radius:8px;margin-top:8px">SAVE</button>
   <div id="myAlerts" style="margin-top:10px"></div>
 </div>
 
 <a class="mt5-btn" onclick="openMT5()">🚀 OPEN IN MT5 APP - TRADE XAUUSD</a>
 <a class="mt5-btn2" onclick="openMT5Chart()">📈 OPEN XAUUSD CHART IN MT5</a>
-<div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">Alert italia hata ukiwa WhatsApp - Web Push + FCM</div>
+<div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">Push notification with sound when target is crossed</div>
 </div>
 
 <div class="card"><b>8 GATES ANALYSIS</b><div id="gates"></div></div>
@@ -275,13 +289,11 @@ body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding
 <script>
 let lastData;
 let fcmToken = localStorage.getItem('tilisi_fcm') || null;
+let lastLocalPrice = null;
 
-// Request Notification permission
 if('Notification' in window && Notification.permission !== 'granted'){
   Notification.requestPermission();
 }
-
-// Load FCM token if firebase-messaging.js added later - for now use Web Push fallback
 
 async function refresh(){
   let r = await fetch('/api/status'); let d = await r.json(); lastData=d;
@@ -317,20 +329,19 @@ function showAlertBox(){
 async function saveAlert(){
   let price = parseFloat(document.getElementById('alertPrice').value);
   let type = document.getElementById('alertType').value;
-  if(!price) return alert('Weka bei!');
+  if(!price) return alert('Please enter price!');
   let res = await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:price,type:type,fcmToken:fcmToken})});
   let j = await res.json();
-  alert('Alert ya '+price+' imewekwa! Utalia ikifika.');
+  alert('Alert set at '+price+'! You will be notified when price crosses it.');
   loadMyAlerts();
-  // Save locally too for instant sound
   let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
   local.push({id:j.alert.id,target:price,type:type,active:true});
   localStorage.setItem('tilisi_local_alerts', JSON.stringify(local));
 }
 async function loadMyAlerts(){
   let r = await fetch('/api/alerts'); let arr = await r.json();
-  let html = '<b>Alerts zako active:</b><br>';
-  if(arr.length==0) html+='<small>Hakuna - weka 4070!</small>';
+  let html = '<b>Your active alerts:</b><br>';
+  if(arr.length==0) html+='<small>No active alerts - set one!</small>';
   arr.forEach(a=>{ html+=`<div class="alert-item"><span>${a.type==='above'?'↑':'↓'} ${a.target}</span><span onclick="deleteAlert(${a.id})" style="color:red;cursor:pointer">X</span></div>` });
   document.getElementById('myAlerts').innerHTML=html;
 }
@@ -341,20 +352,23 @@ async function deleteAlert(id){
   loadMyAlerts();
 }
 function checkLocalAlerts(currentGold){
+  if(lastLocalPrice === null){ lastLocalPrice = currentGold; return; }
   let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
   local.forEach(a=>{
     if(!a.active) return;
-    let hit = (a.type==='above' && currentGold >= a.target) || (a.type==='below' && currentGold <= a.target);
+    let hit = false;
+    if(a.type==='above' && lastLocalPrice < a.target && currentGold >= a.target) hit=true;
+    if(a.type==='below' && lastLocalPrice > a.target && currentGold <= a.target) hit=true;
     if(hit){
       a.active=false;
-      // Play sound + notification
       document.getElementById('alertSound').play();
       if(Notification.permission==='granted'){
-        new Notification(`GOLD IMEFIKA ${a.target}!`,{body:`Sasa ni $${currentGold}. Fungua Tilisi Gold!`,icon:'/icon'});
+        new Notification(`GOLD ALERT ${a.target} Hit!`,{body:`Price is now $${currentGold}`,icon:'/icon'});
       }
       if(navigator.vibrate) navigator.vibrate([500,200,500]);
     }
   });
+  lastLocalPrice = currentGold;
   localStorage.setItem('tilisi_local_alerts', JSON.stringify(local.filter(x=>x.active)));
 }
 
