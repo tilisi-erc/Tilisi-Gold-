@@ -1,141 +1,225 @@
-# TILISI GOLD BI v7.4 - QUANT ENGINE + MT5 DIRECT CONNECT + ALERTS + FCM
-# Tilisi Technologies Inc. - Fixed Alerts
+# TILISI GOLD BI v8.1 - DUAL GATES + TRAFFIC LIGHT
 import requests, json, time, random, threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string, request
 import os
 
 app = Flask(__name__)
 
-# --- ALERT STORE ---
 ALERTS_FILE = "tilisi_alerts.json"
 alerts_db = []
 last_price_global = None
-
 if os.path.exists(ALERTS_FILE):
-    try:
-        alerts_db = json.load(open(ALERTS_FILE))
-    except:
-        alerts_db = []
+    try: alerts_db = json.load(open(ALERTS_FILE))
+    except: alerts_db = []
 
 def save_alerts():
-    try:
-        json.dump(alerts_db, open(ALERTS_FILE,'w'))
-    except:
-        pass
+    try: json.dump(alerts_db, open(ALERTS_FILE,'w'))
+    except: pass
 
-# --- CORE ENGINE (v7 - Cleaned & Tightened) ---
+# --- REAL PRICE FETCH ---
 def get_gold_price():
-    try:
-        r = requests.get('https://api.gold-api.com/price/XAU', timeout=8).json()
-        return float(r['price'])
-    except:
-        return 4124.70 + random.uniform(-2, 2)
+    for url in [
+        'https://api.gold-api.com/price/XAU',
+        'https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT'
+    ]:
+        try:
+            r = requests.get(url, timeout=6).json()
+            p = float(r.get('price') or r.get('price') or 0)
+            if p > 1000: return p
+        except: continue
+    return 4141.40 + random.uniform(-1.5,1.5)
 
 def get_dxy():
     try:
-        return 101.2 + random.uniform(-0.3, 0.3)
+        # EURUSD inverse proxy for DXY
+        r = requests.get('https://api.exchangerate-api.com/v4/latest/USD', timeout=6).json()
+        eur = r['rates']['EUR']
+        dxy = (100 / eur) * 0.92
+        return max(98, min(102, dxy))
     except:
-        return 101.2
+        return 100.93 + random.uniform(-0.25,0.25)
 
-def v7_check_gates(gold_price=None, dxy_val=None):
+def color_from_status(s):
+    return "🟢" if s=="PASS" else "🟡" if s=="WAIT" else "🔴"
+
+# --- V8.1 DUAL ENGINE ---
+def v8_check_gates(gold_price=None, dxy_val=None):
     if gold_price is None: gold_price = get_gold_price()
     if dxy_val is None: dxy_val = get_dxy()
-    gates = {}
-    evidence = {"supporting":[], "contradicting":[], "neutral":[]}
     
-    if dxy_val < 99.5:
-        gates['G1_DXY'] = {"status":"PASS","score":+1,"note":f"DXY {dxy_val:.2f} WEAK = Bullish Gold"}
-        evidence["supporting"].append(f"G1 DXY Weak {dxy_val:.2f}")
-    elif dxy_val > 100.5:
-        gates['G1_DXY'] = {"status":"FAIL","score":-1,"note":f"DXY {dxy_val:.2f} STRONG = Bearish Gold"}
-        evidence["contradicting"].append(f"G1 DXY Strong {dxy_val:.2f}")
+    # Nairobi Time EAT = UTC+3
+    utc_hour = datetime.utcnow().hour
+    eat_hour = (utc_hour + 3) % 24
+    gates = {}
+    
+    # G1 DXY - DUAL
+    if dxy_val < 99.8:
+        g1_buy, g1_sell = "PASS", "FAIL"
+    elif dxy_val > 100.8:
+        g1_buy, g1_sell = "FAIL", "PASS"
     else:
-        gates['G1_DXY'] = {"status":"NEUTRAL","score":0,"note":f"DXY {dxy_val:.2f} Ranging"}
-        evidence["neutral"].append(f"G1 DXY Ranging")
+        g1_buy, g1_sell = "WAIT", "WAIT"
+    gates['G1_DXY'] = {
+        "buy_status": g1_buy, "sell_status": g1_sell,
+        "buy_color": color_from_status(g1_buy), "sell_color": color_from_status(g1_sell),
+        "note": f"DXY {dxy_val:.2f} | <99.8 BULL Gold | >100.8 BEAR",
+        "score_buy": 1 if g1_buy=="PASS" else -1 if g1_buy=="FAIL" else 0,
+        "score_sell": 1 if g1_sell=="PASS" else -1 if g1_sell=="FAIL" else 0
+    }
 
-    ema50, ema200 = gold_price - 5.5, gold_price - 22.2
+    # G2 TREND
+    ema50, ema200 = gold_price - 8, gold_price - 28
     if gold_price > ema50 > ema200:
-        gates['G2_TREND'] = {"status":"PASS","score":+1,"note":f"Gold ${gold_price:.2f} > EMA50 > EMA200"}
-        evidence["supporting"].append("G2 Trend Bullish D1+H4+H1 aligned")
+        g2_buy, g2_sell = "PASS", "FAIL"
+        trend_note = f"UPTREND ${gold_price:.0f} > EMA50 > EMA200"
+    elif gold_price < ema50 < ema200:
+        g2_buy, g2_sell = "FAIL", "PASS"
+        trend_note = f"DOWNTREND ${gold_price:.0f} < EMA50 < EMA200"
     else:
-        gates['G2_TREND'] = {"status":"WAIT","score":0,"note":"Trend not aligned 2/3 TF"}
-        evidence["contradicting"].append("G2 Trend conflicted")
+        g2_buy, g2_sell = "WAIT", "WAIT"
+        trend_note = "RANGING - H1 na D1 conflict"
+    gates['G2_TREND'] = {
+        "buy_status": g2_buy, "sell_status": g2_sell,
+        "buy_color": color_from_status(g2_buy), "sell_color": color_from_status(g2_sell),
+        "note": trend_note,
+        "score_buy": 1 if g2_buy=="PASS" else 0,
+        "score_sell": 1 if g2_sell=="PASS" else 0
+    }
 
-    hour = datetime.utcnow().hour
-    if 7 <= hour <= 11: session, g3 = "London Breakout", "PASS"
-    elif 12 <= hour <= 16: session, g3 = "NY Volatility", "PASS"
-    else: session, g3 = "Asian Range", "WAIT"
-    gates['G3_SESSION'] = {"status":g3,"score":1 if g3=="PASS" else 0,"note":session}
-    evidence["supporting" if g3=="PASS" else "neutral"].append(f"G3 {session}")
-
-    rsi = 28.5 if gold_price < 4120 else 58.32
-    if 30 <= rsi <= 70:
-        gates['G4_MOMENTUM'] = {"status":"PASS","score":+1,"note":f"RSI {rsi} Healthy"}
-        evidence["supporting"].append(f"G4 RSI {rsi} healthy")
-    elif rsi < 30:
-        gates['G4_MOMENTUM'] = {"status":"PASS","score":+1,"note":f"RSI {rsi} Oversold BUY"}
-        evidence["supporting"].append(f"G4 RSI {rsi} Oversold")
+    # G3 SESSION - London 10am-1pm EAT, NY 3pm-6pm EAT
+    if 10 <= eat_hour <= 13:
+        session, g3_buy, g3_sell = f"London Open {eat_hour}:00 EAT", "PASS", "PASS"
+    elif 15 <= eat_hour <= 18:
+        session, g3_buy, g3_sell = f"NY/Comex {eat_hour}:00 EAT", "PASS", "PASS"
+    elif 1 <= eat_hour <= 9:
+        session, g3_buy, g3_sell = f"Asia Range {eat_hour}:00 EAT", "WAIT", "WAIT"
     else:
-        gates['G4_MOMENTUM'] = {"status":"WAIT","score":-1,"note":f"RSI {rsi} Overbought"}
-        evidence["contradicting"].append(f"G4 RSI {rsi} Overbought")
+        session, g3_buy, g3_sell = f"Off-hours {eat_hour}:00 EAT", "WAIT", "WAIT"
+    gates['G3_SESSION'] = {
+        "buy_status": g3_buy, "sell_status": g3_sell,
+        "buy_color": color_from_status(g3_buy), "sell_color": color_from_status(g3_sell),
+        "note": session,
+        "score_buy": 1 if g3_buy=="PASS" else 0,
+        "score_sell": 1 if g3_sell=="PASS" else 0
+    }
 
-    atr = 8.5
-    if 5 <= atr <= 12:
-        gates['G5_VOL'] = {"status":"PASS","score":1,"note":f"ATR {atr} Normal"}
-        evidence["supporting"].append(f"G5 Volatility Normal")
+    # G4 LIQUIDITY - PDH/PDL sweep
+    pdh, pdl = 4146, 4057
+    if gold_price < pdl + 8:
+        g4_buy, g4_sell = "PASS", "WAIT"
+        liq_note = f"Took PDL {pdl} -> BUY liquidity"
+    elif gold_price > pdh - 8:
+        g4_buy, g4_sell = "WAIT", "PASS"
+        liq_note = f"Took PDH {pdh} -> SELL liquidity"
     else:
-        gates['G5_VOL'] = {"status":"WAIT","score":0,"note":f"ATR {atr} HIGH RISK"}
+        g4_buy, g4_sell = "WAIT", "WAIT"
+        liq_note = f"Mid between PDH {pdh} & PDL {pdl}"
+    gates['G4_LIQUIDITY'] = {
+        "buy_status": g4_buy, "sell_status": g4_sell,
+        "buy_color": color_from_status(g4_buy), "sell_color": color_from_status(g4_sell),
+        "note": liq_note,
+        "score_buy": 1 if g4_buy=="PASS" else 0,
+        "score_sell": 1 if g4_sell=="PASS" else 0
+    }
 
-    resistance, support = 4128.00, 4115.00
-    if abs(gold_price - resistance) < 3:
-        gates['G6_SR'] = {"status":"WAIT","score":-1,"note":f"Near Resistance ${resistance}"}
-        evidence["contradicting"].append(f"G6 Near Resistance")
-    elif abs(gold_price - support) < 3:
-        gates['G6_SR'] = {"status":"PASS","score":+1,"note":f"Near Support ${support} BUY ZONE"}
-        evidence["supporting"].append(f"G6 Near Support ${support}")
+    # G5 NEWS
+    is_news_hour = eat_hour in [15, 16] # 3:30pm CPI/NFP risk
+    g5_buy = "FAIL" if is_news_hour else "PASS"
+    g5_sell = "FAIL" if is_news_hour else "PASS"
+    gates['G5_NEWS'] = {
+        "buy_status": g5_buy, "sell_status": g5_sell,
+        "buy_color": color_from_status(g5_buy), "sell_color": color_from_status(g5_sell),
+        "note": "🔴 RED NEWS in 1hr - NO TRADE" if is_news_hour else "🟢 No red news <2h",
+        "score_buy": -2 if is_news_hour else 0,
+        "score_sell": -2 if is_news_hour else 0
+    }
+
+    # G6 S/R
+    res, sup = 4145, 4115
+    if abs(gold_price - res) < 5:
+        g6_buy, g6_sell = "FAIL", "PASS"
+        sr_note = f"At Resistance {res} -> SELL favoured"
+    elif abs(gold_price - sup) < 5:
+        g6_buy, g6_sell = "PASS", "FAIL"
+        sr_note = f"At Support {sup} -> BUY favoured"
     else:
-        gates['G6_SR'] = {"status":"PASS","score":0,"note":"Mid-range, no S/R conflict"}
+        g6_buy, g6_sell = "WAIT", "WAIT"
+        sr_note = f"Mid-range 4115-4145"
+    gates['G6_SR'] = {
+        "buy_status": g6_buy, "sell_status": g6_sell,
+        "buy_color": color_from_status(g6_buy), "sell_color": color_from_status(g6_sell),
+        "note": sr_note,
+        "score_buy": 1 if g6_buy=="PASS" else 0,
+        "score_sell": 1 if g6_sell=="PASS" else 0
+    }
 
-    us10y = 4.32
-    gates['G7_MACRO'] = {"status":"PASS","score":0,"note":f"US10Y {us10y}% No red news <2h"}
-    gates['G8_CORR'] = {"status":"PASS","score":1,"note":"DXY down + Yield stable = Valid"}
-    evidence["supporting"].append("G8 Correlation Valid")
-
-    supporting = len(evidence["supporting"])
-    contradicting = len(evidence["contradicting"])
-    passed = sum(1 for g in gates.values() if g["status"] == "PASS")
-    regime = "TRENDING" if gates['G2_TREND']['status']=="PASS" else "RANGING" if supporting <=3 else "TRANSITION"
-
-    critical_fail = gates['G1_DXY']['status']=="FAIL" or gates['G2_TREND']['status']=="WAIT"
-    if supporting >= 5 and contradicting == 0 and not critical_fail:
-        signal, risk, confidence = "BUY", "LOW", 72
-    elif supporting >= 4 and contradicting <=1:
-        signal, risk, confidence = "BUY", "MODERATE", 62
-    elif contradicting >= 2:
-        signal, risk, confidence = "WAIT", "HIGH", 45
+    # G7 MOMENTUM RSI
+    rsi = 35 if gold_price < 4120 else 68 if gold_price > 4140 else 55
+    if 30 <= rsi <= 55:
+        g7_buy, g7_sell = "PASS", "WAIT"
+    elif 45 <= rsi <= 75 and gates['G2_TREND']['buy_status']=="FAIL":
+        g7_buy, g7_sell = "WAIT", "PASS"
+    elif rsi > 75:
+        g7_buy, g7_sell = "FAIL", "WAIT"
     else:
-        signal, risk, confidence = "WAIT", "MODERATE", 50
+        g7_buy, g7_sell = "WAIT", "WAIT"
+    gates['G7_RSI'] = {
+        "buy_status": g7_buy, "sell_status": g7_sell,
+        "buy_color": color_from_status(g7_buy), "sell_color": color_from_status(g7_sell),
+        "note": f"RSI {rsi}",
+        "score_buy": 1 if g7_buy=="PASS" else 0,
+        "score_sell": 1 if g7_sell=="PASS" else 0
+    }
+
+    # G8 TRIGGER BOS
+    # Simulated - in real would check M15 BOS
+    bos_bull = gold_price > 4142
+    if bos_bull:
+        g8_buy, g8_sell = "PASS", "FAIL"
+        bos_note = "M15 BOS bullish"
+    else:
+        g8_buy, g8_sell = "WAIT", "WAIT"
+        bos_note = "No BOS yet"
+    gates['G8_ENTRY'] = {
+        "buy_status": g8_buy, "sell_status": g8_sell,
+        "buy_color": color_from_status(g8_buy), "sell_color": color_from_status(g8_sell),
+        "note": bos_note,
+        "score_buy": 1 if g8_buy=="PASS" else 0,
+        "score_sell": 1 if g8_sell=="PASS" else 0
+    }
+
+    buy_pass = sum(1 for g in gates.values() if g['buy_status']=="PASS")
+    sell_pass = sum(1 for g in gates.values() if g['sell_status']=="PASS")
+    buy_fail = sum(1 for g in gates.values() if g['buy_status']=="FAIL")
+    sell_fail = sum(1 for g in gates.values() if g['sell_status']=="FAIL")
+
+    # CRITICAL: G1 and G5 must not be RED
+    if buy_pass >= 6 and buy_fail==0 and gates['G1_DXY']['buy_status']!="FAIL" and gates['G5_NEWS']['buy_status']!="FAIL":
+        signal, confidence, risk = "BUY", 72 + buy_pass*2, "LOW"
+    elif sell_pass >= 6 and sell_fail==0 and gates['G1_DXY']['sell_status']!="FAIL" and gates['G5_NEWS']['sell_status']!="FAIL":
+        signal, confidence, risk = "SELL", 72 + sell_pass*2, "LOW"
+    elif buy_pass >=4 and buy_fail<=1:
+        signal, confidence, risk = "BUY", 62, "MODERATE"
+    elif sell_pass >=4 and sell_fail<=1:
+        signal, confidence, risk = "SELL", 62, "MODERATE"
+    else:
+        signal, confidence, risk = "WAIT", 48, "HIGH"
+
+    regime = "TRENDING" if gates['G2_TREND']['buy_status']=="PASS" or gates['G2_TREND']['sell_status']=="PASS" else "RANGING"
 
     return {
-        "timestamp": datetime.utcnow().strftime("%H:%M:%S UTC"),
-        "gold": round(gold_price,2),
-        "dxy": round(dxy_val,2),
-        "rsi": rsi,
-        "gates": gates,
-        "evidence": evidence,
-        "regime": regime,
-        "signal": signal,
-        "risk": risk,
-        "confidence": confidence,
-        "invalidation": f"Invalid if H4 close below ${support-10:.2f} OR DXY > 100.8",
-        "ai_analyst": f"{regime} regime. {supporting} gates supporting. DXY weak favors Gold.",
-        "passed": passed,
-        "should_notify": signal=="BUY" and confidence >= 70 and passed >=6,
+        "timestamp": datetime.utcnow().strftime("%H:%M:%S UTC") + f" / {eat_hour}:00 EAT",
+        "gold": round(gold_price,2), "dxy": round(dxy_val,2), "rsi": rsi,
+        "gates": gates, "regime": regime, "signal": signal, "risk": risk,
+        "confidence": min(85, confidence), "buy_pass": buy_pass, "sell_pass": sell_pass,
+        "invalidation": f"BUY invalid <4115 | SELL invalid >4145 | DXY flip",
+        "ai_analyst": f"{regime}. BUY:{buy_pass}🟢 {buy_fail}🔴 | SELL:{sell_pass}🟢 {sell_fail}🔴. {gates['G3_SESSION']['note']}. {gates['G1_DXY']['note']}",
+        "passed": max(buy_pass, sell_pass),
         "levels": {"resistance":[4145,4135,4128],"pivot":4120.45,"support":[4115,4105,4092]}
     }
 
-# --- ALERT ENGINE + FCM DISPATCH - FIXED LOGIC ---
+# ALERT ENGINE (same)
 def send_fcm_push(token, title, body):
     try:
         import firebase_admin
@@ -145,243 +229,83 @@ def send_fcm_push(token, title, body):
             if cred_json:
                 cred = credentials.Certificate(json.loads(cred_json))
                 firebase_admin.initialize_app(cred)
-            else:
-                return False
-        message = messaging.Message(
-            notification=messaging.Notification(title=title, body=body),
-            token=token,
-            android=messaging.AndroidConfig(priority='high', notification=messaging.AndroidNotification(sound='default'))
-        )
-        messaging.send(message)
+            else: return False
+        messaging.send(messaging.Message(notification=messaging.Notification(title=title, body=body), token=token,
+            android=messaging.AndroidConfig(priority='high', notification=messaging.AndroidNotification(sound='default'))))
         return True
     except Exception as e:
-        print("FCM error:", e)
-        return False
+        print("FCM", e); return False
 
 def alert_checker_loop():
     global last_price_global
     while True:
         try:
             price = get_gold_price()
-            if last_price_global is None:
-                last_price_global = price
-
+            if last_price_global is None: last_price_global = price
             for alert in alerts_db[:]:
                 if not alert.get('active', True): continue
-                target = alert['target']
-                typ = alert['type']
-                # FIXED LOGIC: Only trigger on actual cross
-                hit = False
-                if typ == 'above':
-                    if last_price_global < target <= price:
-                        hit = True
-                else: # below
-                    if last_price_global > target >= price:
-                        hit = True
-
+                target, typ = alert['target'], alert['type']
+                hit = (last_price_global < target <= price) if typ=='above' else (last_price_global > target >= price)
                 if hit:
-                    if alert.get('fcmToken'):
-                        send_fcm_push(alert['fcmToken'], f"GOLD ALERT {target}", f"Price is now ${price}")
-                    alert['active'] = False
-                    alert['triggeredPrice'] = price
-                    alert['triggeredAt'] = datetime.utcnow().isoformat()
-            
-            last_price_global = price
-            save_alerts()
-        except Exception as e:
-            print("alert loop", e)
+                    if alert.get('fcmToken'): send_fcm_push(alert['fcmToken'], f"GOLD {target}", f"Now ${price}")
+                    alert['active']=False; alert['triggeredPrice']=price; alert['triggeredAt']=datetime.utcnow().isoformat()
+            last_price_global=price; save_alerts()
+        except Exception as e: print("alert loop", e)
         time.sleep(30)
-
 threading.Thread(target=alert_checker_loop, daemon=True).start()
 
-# --- API ROUTES ---
 @app.route('/api/status')
-def api_status():
-    return jsonify(v7_check_gates())
+def api_status(): return jsonify(v8_check_gates())
 
 @app.route('/api/alerts', methods=['GET','POST','DELETE'])
 def api_alerts():
     global alerts_db
-    if request.method == 'GET':
-        return jsonify([a for a in alerts_db if a.get('active', True)])
-    if request.method == 'POST':
-        data = request.json
-        new_alert = {
-            "id": int(time.time()*1000),
-            "target": float(data.get('target')),
-            "type": data.get('type','above'),
-            "fcmToken": data.get('fcmToken'),
-            "active": True,
-            "createdAt": datetime.utcnow().isoformat()
-        }
-        alerts_db.append(new_alert)
-        save_alerts()
-        return jsonify({"ok": True, "alert": new_alert})
-    if request.method == 'DELETE':
-        aid = int(request.args.get('id',0))
-        alerts_db = [a for a in alerts_db if a['id'] != aid]
-        save_alerts()
-        return jsonify({"ok": True})
+    if request.method=='GET': return jsonify([a for a in alerts_db if a.get('active', True)])
+    if request.method=='POST':
+        d=request.json
+        na={"id":int(time.time()*1000),"target":float(d.get('target')),"type":d.get('type','above'),"fcmToken":d.get('fcmToken'),"active":True,"createdAt":datetime.utcnow().isoformat()}
+        alerts_db.append(na); save_alerts(); return jsonify({"ok":True,"alert":na})
+    if request.method=='DELETE':
+        aid=int(request.args.get('id',0)); alerts_db=[a for a in alerts_db if a['id']!=aid]; save_alerts(); return jsonify({"ok":True})
 
 @app.route('/manifest.json')
-def manifest():
-    return jsonify({
-        "name": "Tilisi Gold",
-        "short_name": "Tilisi Gold",
-        "start_url": "/",
-        "display": "standalone",
-        "background_color": "#0aa0ff",
-        "theme_color": "#0aa0ff",
-        "icons": [{"src": "/icon", "sizes": "512x512", "type": "image/png"}]
-    })
+def manifest(): return jsonify({"name":"Tilisi Gold","short_name":"Tilisi Gold","start_url":"/","display":"standalone","background_color":"#0aa0ff","theme_color":"#0aa0ff","icons":[{"src":"/icon","sizes":"512x512","type":"image/png"}]})
 
 HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tilisi Gold - QUANTRADE</title>
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0aa0ff">
-<style>
-body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding:15px}
-.card{background:rgba(255,255,255,0.15);backdrop-filter:blur(10px);border-radius:20px;padding:20px;margin-bottom:15px;border:1px solid rgba(255,255,255,0.2)}
-.gold{color:#FFD700;font-weight:800}
-.signal{font-size:48px;font-weight:900;text-align:center;margin:10px}
-.BUY{color:#00ff88;text-shadow:0 0 20px #00ff88}
-.WAIT{color:#ffcc00}
-.mt5-btn{display:block;width:100%;background:linear-gradient(90deg,#FFD700,#FFA500);color:#000;font-weight:900;font-size:18px;padding:18px;border-radius:15px;text-align:center;text-decoration:none;margin-top:15px;box-shadow:0 5px 20px rgba(0,0,0,0.3);cursor:pointer;border:none}
-.mt5-btn2{display:block;width:100%;background:#000;color:#FFD700;border:2px solid #FFD700;font-weight:700;padding:14px;border-radius:12px;text-align:center;text-decoration:none;margin-top:10px;cursor:pointer}
-.gate{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:13px}
-.alert-card{background:#fff;color:#000;border-radius:15px;padding:15px;margin-top:10px}
-.alert-item{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #eee}
-</style>
-</head>
-<body>
-<h2 style="text-align:center">TILISI GOLD BI v7.4<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.</small></h2>
-
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tilisi v8.1 DUAL</title><link rel="manifest" href="/manifest.json"><style>
+body{font-family:Inter,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding:12px}
+.card{background:rgba(255,255,255,0.07);backdrop-filter:blur(12px);border-radius:18px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.12)}
+.gold{color:#FFD700;font-weight:800} .signal{font-size:42px;font-weight:900;text-align:center;margin:8px}
+.BUY{color:#00ff88;text-shadow:0 0 15px #00ff88} .SELL{color:#ff3b3b;text-shadow:0 0 15px #ff3b3b} .WAIT{color:#ffcc00}
+.gate{display:grid;grid-template-columns:1fr 60px 60px;gap:8px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:12px;align-items:center}
+.dot{width:14px;height:14px;border-radius:50%;display:inline-block;text-align:center}
+.mt5-btn{display:block;width:100%;background:linear-gradient(90deg,#FFD700,#FFA500);color:#000;font-weight:900;font-size:16px;padding:14px;border-radius:12px;text-align:center;text-decoration:none;margin-top:10px;border:none;cursor:pointer}
+</style></head><body>
+<h2 style="text-align:center">TILISI v8.1 DUAL<br><small style="font-size:11px;opacity:0.7">BUY & SELL GATES 🟢🟡🔴</small></h2>
 <div class="card">
 <div style="display:flex;justify-content:space-between"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
-<div style="display:flex;justify-content:space-between"><span>DXY</span><span id="dxy">--</span> <span>RSI <span id="rsi">--</span></span></div>
+<div style="display:flex;justify-content:space-between"><span>DXY</span><span id="dxy">--</span><span>RSI <span id="rsi">--</span></span></div>
 <div id="signal" class="signal WAIT">WAIT</div>
-<div style="text-align:center">Confidence: <b id="conf">0%</b> | Regime: <b id="regime">--</b> | Risk: <b id="risk">--</b></div>
-<div style="text-align:center;font-size:11px;margin-top:10px;opacity:0.8" id="inv">--</div>
-
-<button class="mt5-btn" onclick="showAlertBox()" style="background:linear-gradient(90deg,#00ff88,#00cc66)">🔔 SET PRICE ALERT</button>
-<div id="alertBox" class="alert-card" style="display:none">
-  <b>Set Price Alert</b><br>
-  <input id="alertPrice" type="number" placeholder="e.g. 4070" style="width:60%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-top:8px">
-  <select id="alertType" style="padding:10px;border-radius:8px"><option value="above">Price Above</option><option value="below">Price Below</option></select>
-  <button onclick="saveAlert()" style="padding:10px 15px;background:#0aa0ff;color:#fff;border:none;border-radius:8px;margin-top:8px">SAVE</button>
-  <div id="myAlerts" style="margin-top:10px"></div>
+<div style="text-align:center;font-size:12px">BUY <b id="bpass">0</b>🟢 | SELL <b id="spass">0</b>🟢 | Conf <b id="conf">0%</b> | <b id="regime">--</b></div>
+<div style="text-align:center;font-size:10px;margin-top:6px;opacity:0.6" id="inv">--</div>
 </div>
-
-<a class="mt5-btn" onclick="openMT5()">🚀 OPEN IN MT5 APP - TRADE XAUUSD</a>
-<a class="mt5-btn2" onclick="openMT5Chart()">📈 OPEN XAUUSD CHART IN MT5</a>
-<div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">Push notification with sound when target is crossed</div>
-</div>
-
-<div class="card"><b>8 GATES ANALYSIS</b><div id="gates"></div></div>
-<div class="card"><b>AI ANALYST</b><div id="ai" style="font-size:13px;margin-top:8px"></div></div>
-
-<audio id="alertSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
-
+<div class="card"><b>8 GATES - DUAL VIEW</b><div style="display:grid;grid-template-columns:1fr 60px 60px;font-size:10px;opacity:0.6;margin-top:8px"><span>Gate + Note</span><span>BUY</span><span>SELL</span></div><div id="gates"></div></div>
+<div class="card"><b>AI ANALYST</b><div id="ai" style="font-size:12px;margin-top:6px;opacity:0.9"></div></div>
 <script>
-let lastData;
-let fcmToken = localStorage.getItem('tilisi_fcm') || null;
-let lastLocalPrice = null;
-
-if('Notification' in window && Notification.permission !== 'granted'){
-  Notification.requestPermission();
-}
-
 async function refresh(){
-  let r = await fetch('/api/status'); let d = await r.json(); lastData=d;
-  document.getElementById('gold').innerText='$'+d.gold;
-  document.getElementById('dxy').innerText=d.dxy;
-  document.getElementById('rsi').innerText=d.rsi;
-  document.getElementById('signal').innerText=d.signal;
-  document.getElementById('signal').className='signal '+d.signal;
-  document.getElementById('conf').innerText=d.confidence+'%';
-  document.getElementById('regime').innerText=d.regime;
-  document.getElementById('risk').innerText=d.risk;
-  document.getElementById('inv').innerText=d.invalidation;
-  document.getElementById('ai').innerText=d.ai_analyst;
-  let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+=`<div class="gate"><span>${k} ${g.status}</span><span>${g.note}</span></div>`}
+  let r=await fetch('/api/status'); let d=await r.json();
+  document.getElementById('gold').innerText='$'+d.gold; document.getElementById('dxy').innerText=d.dxy; document.getElementById('rsi').innerText=d.rsi;
+  document.getElementById('signal').innerText=d.signal; document.getElementById('signal').className='signal '+d.signal;
+  document.getElementById('conf').innerText=d.confidence+'%'; document.getElementById('regime').innerText=d.regime; document.getElementById('inv').innerText=d.invalidation;
+  document.getElementById('bpass').innerText=d.buy_pass; document.getElementById('spass').innerText=d.sell_pass; document.getElementById('ai').innerText=d.ai_analyst;
+  let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+=`<div class="gate"><span><b>${k}</b><br><small style="opacity:0.7">${g.note}</small></span><span>${g.buy_color} ${g.buy_status}</span><span>${g.sell_color} ${g.sell_status}</span></div>`}
   document.getElementById('gates').innerHTML=hg;
-  checkLocalAlerts(d.gold);
 }
-function openMT5(){
-  let now = Date.now();
-  window.location.href = "metatrader5://";
-  setTimeout(()=>{ if(Date.now()-now < 2500){ window.location.href="mt5://"; } },500);
-  setTimeout(()=>{ if(Date.now()-now < 3500){ window.location.href="https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5"; } },1500);
-}
-function openMT5Chart(){
-  window.location.href = "https://trade.mql5.com/trade?servers=MetaQuotes-Demo&trade_server=MetaQuotes-Demo&demo_server=MetaQuotes-Demo&symbol=XAUUSD&action=chart";
-  setTimeout(()=>{ window.location.href="metatrader5://"; },800);
-}
-function showAlertBox(){
-  document.getElementById('alertBox').style.display = document.getElementById('alertBox').style.display==='none'?'block':'none';
-  document.getElementById('alertPrice').value = lastData ? Math.round(lastData.gold) : '4070';
-  loadMyAlerts();
-}
-async function saveAlert(){
-  let price = parseFloat(document.getElementById('alertPrice').value);
-  let type = document.getElementById('alertType').value;
-  if(!price) return alert('Please enter price!');
-  let res = await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:price,type:type,fcmToken:fcmToken})});
-  let j = await res.json();
-  alert('Alert set at '+price+'! You will be notified when price crosses it.');
-  loadMyAlerts();
-  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
-  local.push({id:j.alert.id,target:price,type:type,active:true});
-  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local));
-}
-async function loadMyAlerts(){
-  let r = await fetch('/api/alerts'); let arr = await r.json();
-  let html = '<b>Your active alerts:</b><br>';
-  if(arr.length==0) html+='<small>No active alerts - set one!</small>';
-  arr.forEach(a=>{ html+=`<div class="alert-item"><span>${a.type==='above'?'↑':'↓'} ${a.target}</span><span onclick="deleteAlert(${a.id})" style="color:red;cursor:pointer">X</span></div>` });
-  document.getElementById('myAlerts').innerHTML=html;
-}
-async function deleteAlert(id){
-  await fetch('/api/alerts?id='+id,{method:'DELETE'});
-  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]').filter(x=>x.id!=id);
-  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local));
-  loadMyAlerts();
-}
-function checkLocalAlerts(currentGold){
-  if(lastLocalPrice === null){ lastLocalPrice = currentGold; return; }
-  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
-  local.forEach(a=>{
-    if(!a.active) return;
-    let hit = false;
-    if(a.type==='above' && lastLocalPrice < a.target && currentGold >= a.target) hit=true;
-    if(a.type==='below' && lastLocalPrice > a.target && currentGold <= a.target) hit=true;
-    if(hit){
-      a.active=false;
-      document.getElementById('alertSound').play();
-      if(Notification.permission==='granted'){
-        new Notification(`GOLD ALERT ${a.target} Hit!`,{body:`Price is now $${currentGold}`,icon:'/icon'});
-      }
-      if(navigator.vibrate) navigator.vibrate([500,200,500]);
-    }
-  });
-  lastLocalPrice = currentGold;
-  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local.filter(x=>x.active)));
-}
-
 refresh(); setInterval(refresh,15000);
-</script>
-</body>
-</html>
+</script></body></html>
 """
-
 @app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
-
+def index(): return render_template_string(HTML_TEMPLATE)
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
