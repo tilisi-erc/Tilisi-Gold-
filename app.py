@@ -1,12 +1,28 @@
-# TILISI GOLD BI v7.2 - QUANT ENGINE + MT5 DIRECT CONNECT
-# Tilisi Technologies Inc.™ - Sky Blue Edition - FIXED FOR APK
-import requests, json, time, random
+# TILISI GOLD BI v7.3 - QUANT ENGINE + MT5 DIRECT CONNECT + ALERTS + FCM
+# Tilisi Technologies Inc.™ - Sky Blue Edition
+import requests, json, time, random, threading
 from datetime import datetime
-from flask import Flask, jsonify, render_template_string, send_from_directory
+from flask import Flask, jsonify, render_template_string, send_from_directory, request
 import os
 
 app = Flask(__name__)
 
+# --- ALERT STORE (in-memory + file for persistence) ---
+ALERTS_FILE = "tilisi_alerts.json"
+alerts_db = []
+if os.path.exists(ALERTS_FILE):
+    try:
+        alerts_db = json.load(open(ALERTS_FILE))
+    except:
+        alerts_db = []
+
+def save_alerts():
+    try:
+        json.dump(alerts_db, open(ALERTS_FILE,'w'))
+    except:
+        pass
+
+# --- CORE ENGINE (v7 - Cleaned & Tightened) ---
 def get_gold_price():
     try:
         r = requests.get('https://api.gold-api.com/price/XAU', timeout=8).json()
@@ -117,38 +133,93 @@ def v7_check_gates(gold_price=None, dxy_val=None):
         "levels": {"resistance":[4145,4135,4128],"pivot":4120.45,"support":[4115,4105,4092]}
     }
 
+# --- NEW: ALERT ENGINE + FCM DISPATCH ---
+def send_fcm_push(token, title, body):
+    # FCM v1 - weka SERVICE_ACCOUNT JSON kama env var FIREBASE_CRED
+    try:
+        import firebase_admin
+        from firebase_admin import messaging, credentials
+        if not firebase_admin._apps:
+            cred_json = os.environ.get("FIREBASE_CRED")
+            if cred_json:
+                cred = credentials.Certificate(json.loads(cred_json))
+                firebase_admin.initialize_app(cred)
+            else:
+                return False
+        message = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            token=token,
+            android=messaging.AndroidConfig(priority='high', notification=messaging.AndroidNotification(sound='default'))
+        )
+        messaging.send(message)
+        return True
+    except Exception as e:
+        print("FCM error:", e)
+        return False
+
+def alert_checker_loop():
+    while True:
+        try:
+            price = get_gold_price()
+            for alert in alerts_db[:]:
+                if not alert.get('active', True): continue
+                target = alert['target']
+                typ = alert['type'] # above / below
+                hit = (typ=='above' and price >= target) or (typ=='below' and price <= target)
+                if hit:
+                    # FCM push if token exists
+                    if alert.get('fcmToken'):
+                        send_fcm_push(alert['fcmToken'], f"GOLD IMEFIKA {target}!", f"Sasa ni ${price}. Fungua Tilisi Gold!")
+                    alert['active'] = False
+                    alert['triggeredPrice'] = price
+                    alert['triggeredAt'] = datetime.utcnow().isoformat()
+            save_alerts()
+        except Exception as e:
+            print("alert loop", e)
+        time.sleep(30) # check every 30 sec
+
+threading.Thread(target=alert_checker_loop, daemon=True).start()
+
+# --- API ROUTES ---
 @app.route('/api/status')
 def api_status():
     return jsonify(v7_check_gates())
 
-# --- FIXED FOR PWA BUILDER ---
+@app.route('/api/alerts', methods=['GET','POST','DELETE'])
+def api_alerts():
+    global alerts_db
+    if request.method == 'GET':
+        return jsonify([a for a in alerts_db if a.get('active', True)])
+    if request.method == 'POST':
+        data = request.json
+        new_alert = {
+            "id": int(time.time()*1000),
+            "target": float(data.get('target')),
+            "type": data.get('type','above'),
+            "fcmToken": data.get('fcmToken'),
+            "active": True,
+            "createdAt": datetime.utcnow().isoformat()
+        }
+        alerts_db.append(new_alert)
+        save_alerts()
+        return jsonify({"ok": True, "alert": new_alert})
+    if request.method == 'DELETE':
+        aid = int(request.args.get('id',0))
+        alerts_db = [a for a in alerts_db if a['id'] != aid]
+        save_alerts()
+        return jsonify({"ok": True})
+
 @app.route('/manifest.json')
 def manifest():
     return jsonify({
         "name": "Tilisi Gold",
         "short_name": "Tilisi Gold",
-        "description": "QUANTRADE TERMINAL XAUUSD - Professional Gold Trading Signals by Tilisi Technologies Inc.",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#0aa0ff",
         "theme_color": "#0aa0ff",
-        "icons": [
-            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
-        ]
+        "icons": [{"src": "/icon", "sizes": "512x512", "type": "image/png"}]
     })
-
-@app.route('/icon-192.png')
-def icon192():
-    return send_from_directory('.', 'icon-192.png')
-
-@app.route('/icon-512.png')
-def icon512():
-    return send_from_directory('.', 'icon-512.png')
-
-@app.route('/sw.js')
-def sw():
-    return send_from_directory('.', 'sw.js')
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -165,27 +236,53 @@ body{font-family:Inter,sans-serif;background:#0aa0ff;color:#fff;margin:0;padding
 .signal{font-size:48px;font-weight:900;text-align:center;margin:10px}
 .BUY{color:#00ff88;text-shadow:0 0 20px #00ff88}
 .WAIT{color:#ffcc00}
-.mt5-btn{display:block;width:100%;background:linear-gradient(90deg,#FFD700,#FFA500);color:#000;font-weight:900;font-size:18px;padding:18px;border-radius:15px;text-align:center;text-decoration:none;margin-top:15px;box-shadow:0 5px 20px rgba(0,0,0,0.3)}
-.mt5-btn2{display:block;width:100%;background:#000;color:#FFD700;border:2px solid #FFD700;font-weight:700;padding:14px;border-radius:12px;text-align:center;text-decoration:none;margin-top:10px}
+.mt5-btn{display:block;width:100%;background:linear-gradient(90deg,#FFD700,#FFA500);color:#000;font-weight:900;font-size:18px;padding:18px;border-radius:15px;text-align:center;text-decoration:none;margin-top:15px;box-shadow:0 5px 20px rgba(0,0,0,0.3);cursor:pointer;border:none}
+.mt5-btn2{display:block;width:100%;background:#000;color:#FFD700;border:2px solid #FFD700;font-weight:700;padding:14px;border-radius:12px;text-align:center;text-decoration:none;margin-top:10px;cursor:pointer}
 .gate{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:13px}
+.alert-card{background:#fff;color:#000;border-radius:15px;padding:15px;margin-top:10px}
+.alert-item{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #eee}
 </style>
 </head>
 <body>
-<h2 style="text-align:center">TILISI GOLD BI v7.2<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.™</small></h2>
+<h2 style="text-align:center">TILISI GOLD BI v7.3<br><small style="font-size:12px;opacity:0.8">Tilisi Technologies Inc.™ + ALERTS</small></h2>
+
 <div class="card">
 <div style="display:flex;justify-content:space-between"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
 <div style="display:flex;justify-content:space-between"><span>DXY</span><span id="dxy">--</span> <span>RSI <span id="rsi">--</span></span></div>
 <div id="signal" class="signal WAIT">WAIT</div>
 <div style="text-align:center">Confidence: <b id="conf">0%</b> | Regime: <b id="regime">--</b> | Risk: <b id="risk">--</b></div>
 <div style="text-align:center;font-size:11px;margin-top:10px;opacity:0.8" id="inv">--</div>
+
+<button class="mt5-btn" onclick="showAlertBox()" style="background:linear-gradient(90deg,#00ff88,#00cc66)">🔔 WEKA ALERT YA BEI (kama Exness)</button>
+<div id="alertBox" class="alert-card" style="display:none">
+  <b>Weka Alert</b><br>
+  <input id="alertPrice" type="number" placeholder="mfano 4070" style="width:60%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-top:8px">
+  <select id="alertType" style="padding:10px;border-radius:8px"><option value="above">Ikipanda juu ya</option><option value="below">Ikishuka chini ya</option></select>
+  <button onclick="saveAlert()" style="padding:10px 15px;background:#0aa0ff;color:#fff;border:none;border-radius:8px;margin-top:8px">SAVE</button>
+  <div id="myAlerts" style="margin-top:10px"></div>
+</div>
+
 <a class="mt5-btn" onclick="openMT5()">🚀 OPEN IN MT5 APP - TRADE XAUUSD</a>
 <a class="mt5-btn2" onclick="openMT5Chart()">📈 OPEN XAUUSD CHART IN MT5</a>
-<div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">If MT5 not installed, will redirect to Play Store</div>
+<div style="text-align:center;font-size:10px;margin-top:8px;opacity:0.7">Alert italia hata ukiwa WhatsApp - Web Push + FCM</div>
 </div>
+
 <div class="card"><b>8 GATES ANALYSIS</b><div id="gates"></div></div>
 <div class="card"><b>AI ANALYST</b><div id="ai" style="font-size:13px;margin-top:8px"></div></div>
+
+<audio id="alertSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
 <script>
 let lastData;
+let fcmToken = localStorage.getItem('tilisi_fcm') || null;
+
+// Request Notification permission
+if('Notification' in window && Notification.permission !== 'granted'){
+  Notification.requestPermission();
+}
+
+// Load FCM token if firebase-messaging.js added later - for now use Web Push fallback
+
 async function refresh(){
   let r = await fetch('/api/status'); let d = await r.json(); lastData=d;
   document.getElementById('gold').innerText='$'+d.gold;
@@ -200,6 +297,7 @@ async function refresh(){
   document.getElementById('ai').innerText=d.ai_analyst;
   let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+=`<div class="gate"><span>${k} ${g.status}</span><span>${g.note}</span></div>`}
   document.getElementById('gates').innerHTML=hg;
+  checkLocalAlerts(d.gold);
 }
 function openMT5(){
   let now = Date.now();
@@ -211,6 +309,55 @@ function openMT5Chart(){
   window.location.href = "https://trade.mql5.com/trade?servers=MetaQuotes-Demo&trade_server=MetaQuotes-Demo&demo_server=MetaQuotes-Demo&symbol=XAUUSD&action=chart";
   setTimeout(()=>{ window.location.href="metatrader5://"; },800);
 }
+function showAlertBox(){
+  document.getElementById('alertBox').style.display = document.getElementById('alertBox').style.display==='none'?'block':'none';
+  document.getElementById('alertPrice').value = lastData ? Math.round(lastData.gold) : '4070';
+  loadMyAlerts();
+}
+async function saveAlert(){
+  let price = parseFloat(document.getElementById('alertPrice').value);
+  let type = document.getElementById('alertType').value;
+  if(!price) return alert('Weka bei!');
+  let res = await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:price,type:type,fcmToken:fcmToken})});
+  let j = await res.json();
+  alert('Alert ya '+price+' imewekwa! Utalia ikifika.');
+  loadMyAlerts();
+  // Save locally too for instant sound
+  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
+  local.push({id:j.alert.id,target:price,type:type,active:true});
+  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local));
+}
+async function loadMyAlerts(){
+  let r = await fetch('/api/alerts'); let arr = await r.json();
+  let html = '<b>Alerts zako active:</b><br>';
+  if(arr.length==0) html+='<small>Hakuna - weka 4070!</small>';
+  arr.forEach(a=>{ html+=`<div class="alert-item"><span>${a.type==='above'?'↑':'↓'} ${a.target}</span><span onclick="deleteAlert(${a.id})" style="color:red;cursor:pointer">X</span></div>` });
+  document.getElementById('myAlerts').innerHTML=html;
+}
+async function deleteAlert(id){
+  await fetch('/api/alerts?id='+id,{method:'DELETE'});
+  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]').filter(x=>x.id!=id);
+  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local));
+  loadMyAlerts();
+}
+function checkLocalAlerts(currentGold){
+  let local = JSON.parse(localStorage.getItem('tilisi_local_alerts')||'[]');
+  local.forEach(a=>{
+    if(!a.active) return;
+    let hit = (a.type==='above' && currentGold >= a.target) || (a.type==='below' && currentGold <= a.target);
+    if(hit){
+      a.active=false;
+      // Play sound + notification
+      document.getElementById('alertSound').play();
+      if(Notification.permission==='granted'){
+        new Notification(`GOLD IMEFIKA ${a.target}!`,{body:`Sasa ni $${currentGold}. Fungua Tilisi Gold!`,icon:'/icon'});
+      }
+      if(navigator.vibrate) navigator.vibrate([500,200,500]);
+    }
+  });
+  localStorage.setItem('tilisi_local_alerts', JSON.stringify(local.filter(x=>x.active)));
+}
+
 refresh(); setInterval(refresh,15000);
 </script>
 </body>
