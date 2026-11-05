@@ -290,4 +290,7 @@ refresh(); setInterval(refresh,15000); initFCM();
 '''
 
 @app.route('/')
-def index(): return render
+def index(): return render_template_string(HTML_TEMPLATE)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
