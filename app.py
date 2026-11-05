@@ -1,4 +1,3 @@
-#TILISI GOLD 
 import requests, json, time, random, threading
 from datetime import datetime
 from flask import Flask, jsonify, request, Response
@@ -7,15 +6,23 @@ import os
 app = Flask(__name__)
 
 ALERTS_FILE = "tilisi_alerts.json"
+FCM_FILE = "tilisi_fcm.json"
 alerts_db = []
+fcm_tokens = []
 last_price_global = None
 
 if os.path.exists(ALERTS_FILE):
     try: alerts_db = json.load(open(ALERTS_FILE))
     except: alerts_db = []
+if os.path.exists(FCM_FILE):
+    try: fcm_tokens = json.load(open(FCM_FILE))
+    except: fcm_tokens = []
 
 def save_alerts():
     try: json.dump(alerts_db, open(ALERTS_FILE,'w'))
+    except: pass
+def save_fcm():
+    try: json.dump(fcm_tokens, open(FCM_FILE,'w'))
     except: pass
 
 def get_gold_price():
@@ -85,6 +92,20 @@ def v8_check_gates(gold_price=None, dxy_val=None):
     regime="TRENDING" if g2_buy=="PASS" or gates['G2_TREND']['sell_status']=="PASS" else "RANGING"
     return {"timestamp":f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","gold":round(gold_price,2),"dxy":round(dxy_val,2),"rsi":rsi,"gates":gates,"regime":regime,"signal":signal,"confidence":conf,"buy_pass":buy_pass,"sell_pass":sell_pass,"invalidation":"BUY <4115 | SELL >4145","ai_analyst":f"{regime}. BUY:{buy_pass}G {buy_fail}R | SELL:{sell_pass}G {sell_fail}R. {sess}"}
 
+def send_fcm_push(token, title, body):
+    try:
+        import firebase_admin
+        from firebase_admin import messaging, credentials
+        if not firebase_admin._apps:
+            cred_json=os.environ.get("FIREBASE_CRED")
+            if cred_json:
+                cred=credentials.Certificate(json.loads(cred_json))
+                firebase_admin.initialize_app(cred)
+            else: return False
+        msg=messaging.Message(notification=messaging.Notification(title=title,body=body),token=token,android=messaging.AndroidConfig(priority='high',notification=messaging.AndroidNotification(sound='default')))
+        messaging.send(msg); return True
+    except Exception as e: print("FCM error",e); return False
+
 def alert_checker_loop():
     global last_price_global
     while True:
@@ -95,16 +116,17 @@ def alert_checker_loop():
                 if not alert.get('active',True): continue
                 target,typ=alert['target'],alert['type']
                 hit=(last_price_global<target<=price) if typ=='above' else (last_price_global>target>=price)
-                if hit: alert['active']=False
+                if hit:
+                    if alert.get('fcmToken'):
+                        send_fcm_push(alert['fcmToken'], f"GOLD {target} HIT", f"Now ${price:.2f}")
+                    alert['active']=False
             last_price_global=price; save_alerts()
         except: pass
         time.sleep(30)
 threading.Thread(target=alert_checker_loop, daemon=True).start()
 
 @app.route('/api/status')
-def api_status(): 
-    try: return jsonify(v8_check_gates())
-    except Exception as e: return jsonify({"signal":"WAIT","gold":4134,"dxy":100.9,"rsi":55,"confidence":48,"buy_pass":0,"sell_pass":0,"regime":"RANGING","gates":{},"ai_analyst":f"Error: {e}","invalidation":"","timestamp":""})
+def api_status(): return jsonify(v8_check_gates())
 
 @app.route('/api/alerts', methods=['GET','POST','DELETE'])
 def api_alerts():
@@ -112,10 +134,34 @@ def api_alerts():
     if request.method=='GET': return jsonify([a for a in alerts_db if a.get('active',True)])
     if request.method=='POST':
         d=request.json
-        na={"id":int(time.time()*1000),"target":float(d.get('target')),"type":d.get('type','above'),"active":True,"createdAt":datetime.utcnow().isoformat()}
+        na={"id":int(time.time()*1000),"target":float(d.get('target')),"type":d.get('type','above'),"fcmToken":d.get('fcmToken'),"active":True,"createdAt":datetime.utcnow().isoformat()}
         alerts_db.append(na); save_alerts(); return jsonify({"ok":True,"alert":na})
     if request.method=='DELETE':
         aid=int(request.args.get('id',0)); alerts_db=[a for a in alerts_db if a['id']!=aid]; save_alerts(); return jsonify({"ok":True})
+
+@app.route('/api/fcm/register', methods=['POST'])
+def api_fcm_reg():
+    global fcm_tokens
+    token=request.json.get('token')
+    if token and token not in fcm_tokens: fcm_tokens.append(token); save_fcm()
+    return jsonify({"ok":True})
+
+@app.route('/api/fcm/test', methods=['POST'])
+def api_fcm_test():
+    token=request.json.get('token'); ok=send_fcm_push(token, "Tilisi Test", "Push inafanya kazi!"); return jsonify({"ok":ok})
+
+@app.route('/firebase-messaging-sw.js')
+def sw():
+    js = '''
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js');
+firebase.initializeApp({apiKey:"AIzaSyDemo", authDomain:"tilisi-demo.firebaseapp.com", projectId:"tilisi-demo"});
+const messaging = firebase.messaging();
+messaging.onBackgroundMessage(payload => {
+  self.registration.showNotification(payload.notification.title, {body: payload.notification.body});
+});
+'''
+    return Response(js, mimetype='application/javascript')
 
 @app.route('/manifest.json')
 def manifest(): return jsonify({"name":"Tilisi Gold","short_name":"Tilisi","start_url":"/","display":"standalone","background_color":"#0a0e1a","theme_color":"#0a0e1a"})
@@ -127,14 +173,14 @@ body{font-family:Inter,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding
 .card{background:rgba(255,255,255,0.07);backdrop-filter:blur(12px);border-radius:16px;padding:14px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.12)}
 .gold{color:#FFD700;font-weight:800} 
 .signal{font-size:42px;font-weight:900;text-align:center;margin:8px;cursor:pointer;border-radius:12px;padding:10px}
-.BUY{color:#00ff88;text-shadow:0 0 15px #00ff88;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3)} 
-.SELL{color:#ff3b3b;text-shadow:0 0 15px #ff3b3b;background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.3)} 
+.BUY{color:#00ff88;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.3)} 
+.SELL{color:#ff3b3b;background:rgba(255,59,59,0.08);border:1px solid rgba(255,59,59,0.3)} 
 .WAIT{color:#ffcc00;background:rgba(255,204,0,0.08);border:1px solid rgba(255,204,0,0.3)}
 .gate{display:grid;grid-template-columns:1fr 38px 38px;gap:4px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.07);font-size:11.5px;align-items:center}
 .dot{width:16px;height:16px;border-radius:50%;display:inline-block}
 .dot-green{background:#00ff88;box-shadow:0 0 10px #00ff88}.dot-yellow{background:#ffcc00;box-shadow:0 0 10px #ffcc00}.dot-red{background:#ff3b3b;box-shadow:0 0 10px #ff3b3b}
 .btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
-.btn-sm{padding:11px 6px;font-size:11px;font-weight:800;border-radius:10px;border:none;cursor:pointer;text-align:center;display:block}
+.btn-sm{padding:11px 6px;font-size:11px;font-weight:800;border-radius:10px;border:none;cursor:pointer;text-align:center}
 .btn-alert{background:linear-gradient(90deg,#00ff88,#00cc66);color:#000}
 .btn-mt5{background:linear-gradient(90deg,#FFD700,#FFA500);color:#000}
 .btn-buy{background:#00ff88;color:#000}.btn-sell{background:#ff3b3b;color:#fff}
@@ -161,33 +207,41 @@ body{font-family:Inter,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding
     <button onclick="saveAlert()" style="padding:8px 12px;background:#0a0e1a;color:#FFD700;border:none;border-radius:8px;font-size:11px;font-weight:800">SAVE</button>
   </div>
   <div id="myAlerts" style="margin-top:8px"></div>
+  <button onclick="testFCM()" style="margin-top:8px;padding:6px 10px;font-size:10px;background:#0a0e1a;color:#fff;border-radius:6px;border:none">Test Push</button>
 </div>
 </div>
 <div class="card">
 <div style="display:flex;justify-content:space-between"><b style="font-size:12px">8 GATES - DUAL</b><span style="font-size:9px;opacity:0.5">DOTS ONLY</span></div>
-<div style="display:grid;grid-template-columns:1fr 38px 38px;font-size:9px;opacity:0.5;margin:8px 0 2px 0"><span>GATE</span><span>BUY</span><span>SELL</span></div>
 <div id="gates"></div>
 </div>
 <div class="card"><b style="font-size:11px">AI ANALYST</b><div id="ai" style="font-size:11px;margin-top:5px;opacity:0.85"></div></div>
 <audio id="alertSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js"></script>
 <script>
-let lastData=null;
+let lastData=null; let fcmToken=localStorage.getItem('tilisi_fcm')||null;
 function smartMT5(){
-  const start = Date.now();
-  window.location.href = 'metatrader5://';
-  setTimeout(()=>{ if(Date.now()-start < 3000){ window.location.href = 'mt5://XAUUSD'; } },700);
-  setTimeout(()=>{
-    if(!document.hidden && (Date.now()-start < 4000)){
-      if(confirm('MT5 App haipo? Download kutoka Play Store?')){
-        window.location.href = 'https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5';
-      }
-    }
-  },2600);
+  const start=Date.now(); window.location.href='metatrader5://';
+  setTimeout(()=>{ if(Date.now()-start<3000){ window.location.href='mt5://XAUUSD'; } },700);
+  setTimeout(()=>{ if(!document.hidden && (Date.now()-start<4000)){ if(confirm('MT5 App haipo? Download kutoka Play Store?')){ window.location.href='https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5'; } } },2600);
 }
 function dotClass(s){ if(s==='PASS') return 'dot dot-green'; if(s==='WAIT') return 'dot dot-yellow'; return 'dot dot-red'; }
+async function initFCM(){
+  try{
+    if(Notification.permission!=='granted'){ await Notification.requestPermission(); }
+    const firebaseConfig={apiKey:"AIzaSyDemo",authDomain:"tilisi-demo.firebaseapp.com",projectId:"tilisi-demo",messagingSenderId:"123456789",appId:"1:123456789:web:demo"};
+    if(!firebase.apps.length){ firebase.initializeApp(firebaseConfig); }
+    const messaging=firebase.messaging();
+    if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('/firebase-messaging-sw.js'); }catch(e){} }
+    const token=await messaging.getToken({vapidKey:"YOUR_VAPID_KEY"});
+    if(token){ fcmToken=token; localStorage.setItem('tilisi_fcm',token); await fetch('/api/fcm/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})}); }
+    messaging.onMessage(payload=>{ new Notification(payload.notification.title,{body:payload.notification.body}); document.getElementById('alertSound').play(); if(navigator.vibrate) navigator.vibrate([400,150,400]); });
+  }catch(e){ console.log('FCM init',e); }
+}
+async function testFCM(){ if(!fcmToken){ alert('Ruhusu notifications kwanza'); return; } await fetch('/api/fcm/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:fcmToken})}); alert('Test push sent!'); }
 async function refresh(){
   try{
-    let r=await fetch('/api/status'); let d=await r.json();
+    let r=await fetch('/api/status'); let d=await r.json(); lastData=d;
     document.getElementById('gold').innerText='$'+d.gold; document.getElementById('dxy').innerText=d.dxy; document.getElementById('rsi').innerText=d.rsi;
     document.getElementById('eat').innerText=d.timestamp; document.getElementById('signal').innerText=d.signal;
     document.getElementById('signal').className='signal '+d.signal; document.getElementById('conf').innerText=d.confidence+'%';
@@ -195,14 +249,13 @@ async function refresh(){
     document.getElementById('ai').innerText=d.ai_analyst;
     let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+='<div class="gate"><span><b>'+k+'</b> <small style="opacity:0.65">'+g.note+'</small></span><span><i class="'+dotClass(g.buy_status)+'"></i></span><span><i class="'+dotClass(g.sell_status)+'"></i></span></div>'}
     document.getElementById('gates').innerHTML=hg;
-    lastData=d;
   }catch(e){ console.log(e); }
 }
 function showAlertBox(){ let b=document.getElementById('alertBox'); b.style.display=b.style.display==='none'?'block':'none'; document.getElementById('alertPrice').value=lastData?Math.round(lastData.gold):'4150'; loadMyAlerts(); }
-async function saveAlert(){ let p=parseFloat(document.getElementById('alertPrice').value); let t=document.getElementById('alertType').value; if(!p) return; await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:p,type:t})}); loadMyAlerts(); }
-async function loadMyAlerts(){ let r=await fetch('/api/alerts'); let arr=await r.json(); let h=''; arr.forEach(a=>{h+='<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid #eee"><span>'+(a.type==='above'?'↑':'↓')+' '+a.target+'</span><span onclick="deleteAlert('+a.id+')" style="color:red;cursor:pointer;font-weight:800">X</span></div>'}); document.getElementById('myAlerts').innerHTML=h||'<small>No alerts</small>'; }
+async function saveAlert(){ let p=parseFloat(document.getElementById('alertPrice').value); let t=document.getElementById('alertType').value; if(!p) return; await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:p,type:t,fcmToken:fcmToken})}); loadMyAlerts(); }
+async function loadMyAlerts(){ let r=await fetch('/api/alerts'); let arr=await r.json(); let h=''; arr.forEach(a=>{h+='<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px"><span>'+(a.type==='above'?'↑':'↓')+' '+a.target+'</span><span onclick="deleteAlert('+a.id+')" style="color:red;cursor:pointer;font-weight:800">X</span></div>'}); document.getElementById('myAlerts').innerHTML=h||'<small>No alerts</small>'; }
 async function deleteAlert(id){ await fetch('/api/alerts?id='+id,{method:'DELETE'}); loadMyAlerts(); }
-refresh(); setInterval(refresh,15000);
+refresh(); setInterval(refresh,15000); initFCM();
 </script></body></html>
 """
 
