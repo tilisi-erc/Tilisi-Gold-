@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TILISI GOLD BI v11 - LIVE</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding:12px}
+.card{background:rgba(255,255,255,0.07);backdrop-filter:blur(12px);border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.12)}
+.gold{color:#FFD700;font-weight:900}
+.engine{font-size:12px;font-weight:900;padding:10px;border-radius:10px;text-align:center}
+.engine-SCANNING{background:#1a2332;color:#9aa8bd}
+.engine-ACTIVE{background:rgba(255,215,0,0.15);color:#FFD700;border:1px solid #FFD700}
+.signal{font-size:42px;font-weight:900;text-align:center;margin:12px 0;padding:14px;border-radius:14px;letter-spacing:1px}
+.BUY{color:#00ff88;background:rgba(0,255,136,0.12);border:1px solid #00ff88}
+.SELL{color:#ff3b3b;background:rgba(255,59,59,0.12);border:1px solid #ff3b3b}
+.WAIT{color:#ffcc00;background:rgba(255,204,0,0.12);border:1px solid #ffcc00}
+input,button{width:100%;padding:15px;margin:7px 0;border-radius:12px;border:none;font-size:14px}
+input{background:#121a2b;color:#fff;border:1px solid #243049}
+button{background:#FFD700;color:#000;font-weight:900;cursor:pointer}
+button.secondary{background:#1e2a44;color:#fff;border:1px solid #2a3a5e}
+.gate{display:grid;grid-template-columns:1fr 55px 55px;gap:4px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;align-items:center}
+.hidden{display:none}
+small{opacity:0.6}
+h2{margin:10px 0 16px;text-align:center;line-height:1.2}
+</style>
+</head>
+<body>
+<h2>TILISI GOLD BI v11<br><small style="font-size:11px">BOS ENGINE + 7 VALIDATORS | Till 9153470</small></h2>
+
+<div id="authCard" class="card">
+<h3 style="margin:0 0 8px">1. Login / Register</h3>
+<input id="phone" placeholder="Phone 2547XXXXXXXX">
+<input id="pass" type="password" placeholder="Password">
+<button onclick="register()">REGISTER</button>
+<button class="secondary" onclick="login()">LOGIN</button>
+<p id="authMsg" style="font-size:12px;word-break:break-all"></p>
+</div>
+
+<div id="payCard" class="card hidden">
+<h3 style="margin:0 0 8px">2. Lipa ku-access Engine</h3>
+<p style="font-size:13px">Status: <span id="subStatus" class="gold">-</span></p>
+<button onclick="pay(500)">LIPA 500 - 7 DAYS</button>
+<button class="secondary" onclick="pay(1500)">LIPA 1500 - 30 DAYS</button>
+<p id="payMsg" style="font-size:12px;word-break:break-all"></p>
+</div>
+
+<div id="engineCard" class="card hidden">
+<div id="engine" class="engine engine-SCANNING">SCANNING...</div>
+<div style="display:flex;justify-content:space-between;margin-top:12px"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
+<div style="font-size:11px;margin:6px 0" id="boslevel">--</div>
+<div id="signal" class="signal WAIT">WAIT</div>
+<div style="text-align:center;font-size:12px;line-height:1.6">Conf <b id="conf">0%</b> | <b id="stage">--</b> | <b id="regime">--</b><br>DXY <b id="dxy">--</b> | <b id="time">--</b></div>
+</div>
+
+<div id="gatesCard" class="card hidden"><b style="font-size:12px">7 VALIDATORS (Weighted)</b><div id="gates" style="margin-top:8px"></div></div>
+<div id="aiCard" class="card hidden"><b style="font-size:12px">AI ANALYST</b><div id="ai" style="font-size:12px;margin-top:8px;line-height:1.5;opacity:0.9"></div><div id="inval" style="font-size:11px;margin-top:8px;color:#ff8c8c"></div></div>
+
+<script>
+const API = location.origin;
+let token = localStorage.getItem('tilisi_token');
+const $ = id => document.getElementById(id);
+const show = (id, yes) => $(id).classList.toggle('hidden', !yes);
+
+function phoneEl(){return $('phone').value.trim()}
+function passEl(){return $('pass').value.trim()}
+
+async function register(){
+ $('authMsg').innerText='Registering...';
+ let r=await fetch(API+'/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
+ let d=await r.json(); $('authMsg').innerText=JSON.stringify(d);
+ if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); checkSub();}
+}
+async function login(){
+ $('authMsg').innerText='Logging in...';
+ let r=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
+ let d=await r.json();
+ if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); $('authMsg').innerText='Logged in ✓'; checkSub();}
+ else $('authMsg').innerText=JSON.stringify(d);
+}
+async function checkSub(){
+ if(!token) return;
+ let r=await fetch(API+'/api/my-subscription',{headers:{'Authorization':'Bearer '+token}});
+ let d=await r.json();
+ show('payCard', true);
+ $('subStatus').innerText = d.active ? 'ACTIVE till '+ (d.until||'') : 'EXPIRED - Lipa chini';
+ if(d.active){ show('engineCard',true); show('gatesCard',true); show('aiCard',true); refresh(); setInterval(refresh,10000); }
+}
+async function pay(amount){
+ $('payMsg').innerText='Tuma STK... Angalia simu yako '+phoneEl();
+ let r=await fetch(API+'/api/pay',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({amount})});
+ let d=await r.json(); $('payMsg').innerText=JSON.stringify(d);
+}
+async function refresh(){
+ try{
+  let r=await fetch(API+'/api/dashboard',{headers:{'Authorization':'Bearer '+token}});
+  if(r.status===402){$('subStatus').innerText='PAYMENT REQUIRED - Lipa'; return;}
+  let d=await r.json();
+  if(d.error){$('subStatus').innerText=d.error; return;}
+  $('gold').innerText='$'+d.gold;
+  $('engine').innerText=d.engine_status+' | '+d.engine_note;
+  $('engine').className='engine '+(d.bos_up?'engine-ACTIVE':'engine-SCANNING');
+  $('boslevel').innerText='Asia '+d.bos_levels.low+' - '+d.bos_levels.high+' | BUY>'+d.bos_levels.buy_trigger+' SELL<'+d.bos_levels.sell_trigger;
+  $('signal').innerText=d.signal + (d.confidence? ' '+d.confidence+'%':'');
+  $('signal').className='signal '+d.signal;
+  $('conf').innerText=d.confidence+'%';
+  $('stage').innerText=d.notify_stage;
+  $('regime').innerText=d.regime;
+  $('dxy').innerText=d.dxy;
+  $('time').innerText=d.timestamp;
+  $('ai').innerText=d.ai_analyst;
+  $('inval').innerText=d.invalidation;
+  let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+=`<div class="gate"><span><b>${k}</b> <small>${g.note} (${g.weight*100}%)</small></span><span style="color:${g.buy_status=='PASS'?'#00ff88':g.buy_status=='FAIL'?'#ff3b3b':'#ffcc00'}">${g.buy_status}</span><span style="color:${g.sell_status=='PASS'?'#00ff88':g.sell_status=='FAIL'?'#ff3b3b':'#ffcc00'}">${g.sell_status}</span></div>`}
+  $('gates').innerHTML=hg||'ENGINE IDLE - No BOS';
+ }catch(e){console.log(e)}
+}
+if(token){ checkSub(); }
+</script>
+</body>
+</html>
