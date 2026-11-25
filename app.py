@@ -1,4 +1,4 @@
-# TILISI GOLD BI v11.2 - FINAL - Store 9153470 + Till 6899566 FELIX
+# TILISI GOLD BI v11.2
 # Live: https://tilisi-gold-bi.onrender.com
 import os, base64, requests, json, time, random, threading, sqlite3, secrets, jwt
 from datetime import datetime, timedelta
