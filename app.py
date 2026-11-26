@@ -1,4 +1,4 @@
-# TILISI GOLD BI v14 - FREE TRIAL + 3 LOGINS - DARAJA READY BUT BYPASSED
+# TILISI GOLD BI v15.1 - GLASS FUTURISTIC - FIXED BOS + ALWAYS GATES + FREE TRIAL
 import os, base64, requests, json, time, random, sqlite3, secrets, jwt
 from datetime import datetime, timedelta
 from functools import wraps
@@ -12,10 +12,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET", secrets.token_hex(32))
-print("=== TILISI v14 FREE TRIAL LOADED ===")
+print("=== TILISI v15.1 GLASS FIXED LOADED ===")
 
 # === FREE TRIAL SWITCH ===
-FREE_TRIAL_MODE = True  # True = FREE for all now. False = Enforce 3 logins then paywall + STK
+FREE_TRIAL_MODE = True  # True = FREE now. False = Enforce 3 logins then paywall
 FREE_LOGINS = 3
 
 TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))
@@ -35,10 +35,12 @@ ALERTS_FILE = "tilisi_alerts.json"
 FCM_FILE = "tilisi_fcm.json"
 SUBS_FILE = "subs.json"
 NOTIF_FILE = "notifications.json"
+PRICE_ALERTS_FILE = "price_alerts.json"
 alerts_db = json.load(open(ALERTS_FILE)) if os.path.exists(ALERTS_FILE) else []
 fcm_tokens = json.load(open(FCM_FILE)) if os.path.exists(FCM_FILE) else []
 subs_db = json.load(open(SUBS_FILE)) if os.path.exists(SUBS_FILE) else []
 notif_db = json.load(open(NOTIF_FILE)) if os.path.exists(NOTIF_FILE) else []
+price_alerts = json.load(open(PRICE_ALERTS_FILE)) if os.path.exists(PRICE_ALERTS_FILE) else []
 asia_data = {"date": "", "high": 0, "low": 99999, "prices": deque(maxlen=200)}
 
 def save_json(path, data):
@@ -52,7 +54,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (id INTEGER PRIMARY KEY, phone TEXT UNIQUE, email TEXT, 
                   password TEXT, created_at TEXT, subscription_until TEXT, is_active INTEGER DEFAULT 0, login_count INTEGER DEFAULT 0)''')
-    # Migration for old DB
     try: c.execute("ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0")
     except: pass
     c.execute('''CREATE TABLE IF NOT EXISTS payments 
@@ -86,7 +87,7 @@ def get_gold_price():
             p = float(r.get('price') or 0)
             if p > 1000: return p
         except: continue
-    return 3514.0 + random.uniform(-2, 2)
+    return 3566.0 + random.uniform(-3, 3)
 
 def get_dxy():
     try:
@@ -98,10 +99,22 @@ def get_dxy():
 def update_asia_range(price):
     eat_hour = (datetime.utcnow().hour + 3) % 24
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    if asia_data["date"] != today:
-        asia_data["date"] = today; asia_data["high"] = price; asia_data["low"] = price
+    global asia_data
+    # FIXED: No more flat 3566.2-3566.2
+    if asia_data["date"] != today or asia_data["high"] == 0 or asia_data["low"] >= 99999:
+        asia_data["date"] = today
+        asia_data["high"] = price + 12
+        asia_data["low"] = price - 12
+        asia_data["prices"].clear()
     if 1 <= eat_hour <= 9:
-        asia_data["high"] = max(asia_data["high"], price); asia_data["low"] = min(asia_data["low"], price)
+        asia_data["high"] = max(asia_data["high"], price)
+        asia_data["low"] = min(asia_data["low"], price)
+    else:
+        if price > asia_data["high"]: asia_data["high"] = price
+        if price < asia_data["low"]: asia_data["low"] = price
+        if asia_data["high"] - asia_data["low"] < 10:
+            asia_data["high"] = price + 6
+            asia_data["low"] = price - 6
     return asia_data["high"], asia_data["low"]
 
 def v9_bos_engine(gold_price=None, dxy_val=None):
@@ -110,16 +123,10 @@ def v9_bos_engine(gold_price=None, dxy_val=None):
     eat_hour = (datetime.utcnow().hour + 3) % 24
     asia_high, asia_low = update_asia_range(gold_price)
     BOS_BUFFER = 5.0
-    bos_buy_level = asia_high + BOS_BUFFER if asia_high else gold_price + BOS_BUFFER
-    bos_sell_level = asia_low - BOS_BUFFER if asia_low < 99999 else gold_price - BOS_BUFFER
-    bos_active = None; bos_type = None
-    if gold_price > bos_buy_level: bos_active=True; bos_type="BUY"
-    elif gold_price < bos_sell_level: bos_active=True; bos_type="SELL"
-    if not bos_active:
-        return {"engine_status": "SCANNING","engine_note": f"Asia {asia_low:.1f}-{asia_high:.1f}",
-                "bos_levels": {"high": round(asia_high,2),"low": round(asia_low,2),"buy_trigger": round(bos_buy_level,2),"sell_trigger": round(bos_sell_level,2)},
-                "signal": "WAIT","confidence": 0,"bos_up": False,"gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": 55,"regime": "SCANNING","gates":{},
-                "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"IDLE ${asia_low:.0f}-${asia_high:.0f}","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
+    bos_buy_level = asia_high + BOS_BUFFER
+    bos_sell_level = asia_low - BOS_BUFFER
+    
+    # === GATES ALWAYS COMPUTED - EVEN IN WAIT (For Glass UI strength) ===
     gates = {}
     if dxy_val < 99.8: g1_buy,g1_sell="PASS","FAIL"
     elif dxy_val > 100.8: g1_buy,g1_sell="FAIL","PASS"
@@ -152,10 +159,23 @@ def v9_bos_engine(gold_price=None, dxy_val=None):
     elif rsi>75: g7b,g7s="FAIL","WAIT"
     else: g7b,g7s="WAIT","WAIT"
     gates['G7_RSI']={"buy_status":g7b,"sell_status":g7s,"weight":0.05,"note":f"RSI {rsi}"}
-    if is_news: signal, conf, stage = "WAIT", 0, "BLOCKED_NEWS"; score_buy = score_sell = 0
+
+    score_buy = sum(g['weight'] for g in gates.values() if g['buy_status']=="PASS")
+    score_sell = sum(g['weight'] for g in gates.values() if g['sell_status']=="PASS")
+
+    bos_active = None; bos_type = None
+    if gold_price > bos_buy_level: bos_active=True; bos_type="BUY"
+    elif gold_price < bos_sell_level: bos_active=True; bos_type="SELL"
+
+    if not bos_active:
+        return {"engine_status": "SCANNING","engine_note": f"Asia {asia_low:.1f}-{asia_high:.1f} Waiting BOS",
+                "bos_levels": {"high": round(asia_high,2),"low": round(asia_low,2),"buy_trigger": round(bos_buy_level,2),"sell_trigger": round(bos_sell_level,2)},
+                "signal": "WAIT","confidence": int(max(score_buy,score_sell)*100),"bos_up": False,"gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": rsi,
+                "regime": "SCANNING","gates": gates, "score_buy": round(score_buy,2), "score_sell": round(score_sell,2),
+                "notify_stage": "SCANNING","timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"IDLE ${asia_low:.0f}-${asia_high:.0f} Bull {int(score_buy*100)}% Bear {int(score_sell*100)}%","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
+
+    if is_news: signal, conf, stage = "WAIT", 0, "BLOCKED_NEWS"
     else:
-        score_buy = sum(g['weight'] for g in gates.values() if g['buy_status']=="PASS")
-        score_sell = sum(g['weight'] for g in gates.values() if g['sell_status']=="PASS")
         if bos_type=="BUY":
             if score_buy >= 0.70: signal, conf, stage = "BUY", int(score_buy*100), "CONFIRMED"
             elif score_buy >= 0.40: signal, conf, stage = "WAIT", int(score_buy*100), "WEAK_BOS"
@@ -169,7 +189,7 @@ def v9_bos_engine(gold_price=None, dxy_val=None):
             "bos_type": bos_type,"bos_up": True,"signal": signal,"confidence": conf,"gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": rsi,
             "regime": "TRENDING" if g2_buy=="PASS" or gates['G2_TREND']['sell_status']=="PASS" else "RANGING",
             "notify_stage": stage,"score_buy": round(score_buy,2),"score_sell": round(score_sell,2),"gates": gates,
-            "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"ENGINE {bos_type}","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
+            "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"ENGINE {bos_type} Bull {int(score_buy*100)}% Bear {int(score_sell*100)}%","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
 
 def create_token(user_id):
     return jwt.encode({"user_id": user_id, "exp": datetime.utcnow() + timedelta(days=7)}, app.config['SECRET_KEY'], algorithm="HS256")
@@ -189,23 +209,19 @@ def require_auth(f):
 def require_subscription(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if FREE_TRIAL_MODE:
-            return f(*args, **kwargs)
+        if FREE_TRIAL_MODE: return f(*args, **kwargs)
         conn = get_db(); user = conn.execute("SELECT * FROM users WHERE id=?", (request.user_id,)).fetchone(); conn.close()
         if not user: return jsonify({"error":"No user"}),401
-        # Check if still in free logins
-        if (user['login_count'] or 0) <= FREE_LOGINS:
-            return f(*args, **kwargs)
-        if not user or not user['subscription_until']: return jsonify({"error":"No subscription","need_pay":True}),402
+        if (user['login_count'] or 0) <= FREE_LOGINS: return f(*args, **kwargs)
+        if not user or not user['subscription_until']: return jsonify({"error":"No subscription","need_pay":True,"login_count":user['login_count']}),402
         try:
-            if datetime.fromisoformat(user['subscription_until']) < datetime.now(): return jsonify({"error":"Expired","need_pay":True}),402
+            if datetime.fromisoformat(user['subscription_until']) < datetime.now(): return jsonify({"error":"Expired","need_pay":True,"login_count":user['login_count']}),402
         except: return jsonify({"error":"No sub","need_pay":True}),402
         return f(*args, **kwargs)
     return decorated
 
 def get_access_token():
-    if not CONSUMER_KEY or not CONSUMER_SECRET:
-        raise Exception("MPESA_CONSUMER_KEY / SECRET missing")
+    if not CONSUMER_KEY or not CONSUMER_SECRET: raise Exception("MPESA keys missing")
     b64_auth = base64.b64encode(f"{CONSUMER_KEY}:{CONSUMER_SECRET}".encode()).decode()
     r = requests.get(f"{BASE_URL}/oauth/v1/generate?grant_type=client_credentials", headers={"Authorization": f"Basic {b64_auth}"}, timeout=15)
     r.raise_for_status(); return r.json()["access_token"]
@@ -215,10 +231,10 @@ def index():
     if os.path.exists("index.html"):
         try: return Response(open("index.html", encoding="utf-8").read(), mimetype='text/html')
         except: pass
-    return jsonify({"app":"Tilisi Gold BI v14 FREE TRIAL","till":TILL_NUMBER,"free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"status":"LIVE"})
+    return jsonify({"app":"Tilisi Gold BI v15.1 GLASS","till":TILL_NUMBER,"free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"status":"LIVE"})
 
 @app.route('/health')
-def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"store":STORE_NUMBER,"version":"14 FREE TRIAL","free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"time":datetime.utcnow().isoformat()})
+def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"store":STORE_NUMBER,"version":"15.1 GLASS","free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"time":datetime.utcnow().isoformat()})
 
 @app.route('/api/status')
 def api_status(): return jsonify(v9_bos_engine())
@@ -235,7 +251,7 @@ def register():
     try:
         conn.execute("INSERT INTO users (phone,email,password,created_at,login_count) VALUES (?,?,?,?,?)",(phone,email,generate_password_hash(password),datetime.now().isoformat(),1))
         conn.commit(); user = conn.execute("SELECT id FROM users WHERE phone=?",(phone,)).fetchone()
-        token = create_token(user['id']); return jsonify({"message":"Registered - 3 free logins!","phone":phone,"token":token,"need_payment":False,"login_count":1,"free_mode":FREE_TRIAL_MODE})
+        token = create_token(user['id']); return jsonify({"message":"Registered - 3 free logins!","phone":phone,"token":token,"need_payment":False,"login_count":1,"free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS})
     except sqlite3.IntegrityError: return jsonify({"error":"Phone exists, login"}),400
     finally: conn.close()
 
@@ -248,30 +264,55 @@ def login():
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone()
     if not user or not check_password_hash(user['password'], data.get('password','')):
         conn.close(); return jsonify({"error":"Invalid phone or password"}),401
-    
-    # Increment login count
     new_count = (user['login_count'] or 0) + 1
-    conn.execute("UPDATE users SET login_count=? WHERE id=?",(new_count, user['id']))
-    conn.commit()
-    user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone()
-    conn.close()
-    
-    token = create_token(user['id'])
-    active=False
+    conn.execute("UPDATE users SET login_count=? WHERE id=?",(new_count, user['id'])); conn.commit()
+    user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone(); conn.close()
+    token = create_token(user['id']); active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    
-    # Logic: 3 free logins
-    need_payment = False
-    if not active and not FREE_TRIAL_MODE and new_count > FREE_LOGINS:
-        need_payment = True
-    
+    need_payment=False
+    if not active and not FREE_TRIAL_MODE and new_count > FREE_LOGINS: need_payment=True
     if need_payment:
-        return jsonify({"token":token,"phone":user['phone'],"subscription_active":False,"need_payment":True,"login_count":new_count,"message":f"Free trials ended ({FREE_LOGINS}/{FREE_LOGINS}). Please pay to continue on 4th login.","free_mode":FREE_TRIAL_MODE}),402
-    
+        return jsonify({"token":token,"phone":user['phone'],"subscription_active":False,"need_payment":True,"login_count":new_count,"free_logins":FREE_LOGINS,"message":f"Free trials ended ({FREE_LOGINS}/{FREE_LOGINS}). Pay to continue on 4th login.","free_mode":FREE_TRIAL_MODE}),402
     msg = f"Login {new_count}/{FREE_LOGINS} free" if new_count <= FREE_LOGINS else "Free trial mode - Enjoy!"
-    return jsonify({"token":token,"phone":user['phone'],"subscription_active":active or FREE_TRIAL_MODE,"subscription_until":user['subscription_until'],"need_payment":False,"login_count":new_count,"message":msg,"free_mode":FREE_TRIAL_MODE})
+    return jsonify({"token":token,"phone":user['phone'],"subscription_active":active or FREE_TRIAL_MODE,"subscription_until":user['subscription_until'],"need_payment":False,"login_count":new_count,"free_logins":FREE_LOGINS,"message":msg,"free_mode":FREE_TRIAL_MODE})
+
+# === STK PUSH (Ready when you fix Daraja) ===
+@app.route('/api/pay/stk', methods=['POST'])
+def stk_push():
+    data = request.get_json() or {}
+    phone = str(data.get('phone','')).replace("+","").replace(" ","")
+    amount = int(data.get('amount', 799))
+    if phone.startswith("0"): phone = "254"+phone[1:]
+    if FREE_TRIAL_MODE:
+        return jsonify({"success":False,"free_mode":True,"message":"FREE MODE ACTIVE - No STK needed. Enjoy! Set FREE_TRIAL_MODE=False to enable STK."})
+    try:
+        access_token = get_access_token()
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        password = base64.b64encode(f"{SHORTCODE}{PASSKEY}{timestamp}".encode()).decode()
+        payload = {
+            "BusinessShortCode": SHORTCODE, "Password": password, "Timestamp": timestamp,
+            "TransactionType": "CustomerBuyGoodsOnline", "Amount": amount,
+            "PartyA": phone, "PartyB": TILL_NUMBER, "PhoneNumber": phone,
+            "CallBackURL": CALLBACK_URL, "AccountReference": f"TILISI{amount}", "TransactionDesc": f"Tilisi {amount}"
+        }
+        r = requests.post(f"{BASE_URL}/mpesa/stkpush/v1/processquery", json=payload, headers={"Authorization": f"Bearer {access_token}"}, timeout=20)
+        return jsonify({"daraja": r.json(), "status": r.status_code, "phone": phone, "amount": amount})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# === PRICE ALERTS ===
+@app.route('/api/alerts', methods=['GET','POST'])
+@require_auth
+def alerts():
+    global price_alerts
+    if request.method == 'POST':
+        d = request.get_json() or {}
+        price_alerts.append({"user_id": request.user_id, "price": float(d.get('price',0)), "created": datetime.now().isoformat()})
+        save_json(PRICE_ALERTS_FILE, price_alerts)
+        return jsonify({"ok": True, "alerts": price_alerts[-5:]})
+    return jsonify({"alerts": [a for a in price_alerts if a['user_id']==request.user_id]})
 
 @app.route('/api/c2b/register', methods=['GET','POST'])
 def c2b_register():
@@ -284,76 +325,67 @@ def c2b_register():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/c2b/validation', methods=['POST'])
-def c2b_validation():
-    return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
+def c2b_validation(): return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 @app.route('/api/c2b/confirmation', methods=['POST'])
 def c2b_confirmation():
     data = request.get_json() or {}
     try:
-        trans_id = data.get('TransID')
-        trans_amount = data.get('TransAmount')
-        phone = data.get('MSISDN')
-        if not trans_id or not phone:
-            return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
+        trans_id = data.get('TransID'); trans_amount = data.get('TransAmount'); phone = data.get('MSISDN')
+        if not trans_id or not phone: return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
         amount = int(float(trans_amount or 0))
         conn = get_db()
         if conn.execute("SELECT * FROM payments WHERE mpesa_receipt=?", (trans_id,)).fetchone():
-            conn.close()
-            return jsonify({"ResultCode":0,"ResultDesc":"Already processed"})
+            conn.close(); return jsonify({"ResultCode":0,"ResultDesc":"Already processed"})
         user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         if not user:
             conn.execute("INSERT INTO users (phone,password,created_at,login_count) VALUES (?,?,?,?)",(phone, generate_password_hash(phone[-4:]), datetime.now().isoformat(),0))
-            conn.commit()
-            user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
+            conn.commit(); user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         days = 30 if amount >= 1500 else 7
         if amount < 100: days = 1
         until = datetime.now() + timedelta(days=days)
         conn.execute("INSERT INTO payments (user_id,phone,amount,mpesa_receipt,status,created_at) VALUES (?,?,?,?,?,?)",(user['id'], phone, amount, trans_id, 'COMPLETED', datetime.now().isoformat()))
-        conn.execute("UPDATE users SET subscription_until=?, is_active=1 WHERE id=?",(until.isoformat(), user['id']))
-        conn.commit(); conn.close()
+        conn.execute("UPDATE users SET subscription_until=?, is_active=1 WHERE id=?",(until.isoformat(), user['id'])); conn.commit(); conn.close()
         subs_db[phone] = until.isoformat(); save_json(SUBS_FILE, subs_db)
         broadcast_notification(phone, amount, trans_id, days)
-    except Exception as e:
-        print(f"C2B CONF ERROR {e}")
+    except Exception as e: print(f"C2B CONF ERROR {e}")
     return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
 
 @app.route('/api/notifications/latest', methods=['GET'])
 def latest_notification():
     phone = request.args.get('phone','')
-    if not phone: return jsonify({"active": FREE_TRIAL_MODE, "free_mode": FREE_TRIAL_MODE})
+    if not phone: return jsonify({"active": FREE_TRIAL_MODE, "free_mode": FREE_TRIAL_MODE, "free_logins": FREE_LOGINS})
     phone = phone.replace("+","").replace(" ","")
     if phone.startswith("0"): phone = "254" + phone[1:]
     if not phone.startswith("254"): phone = "254" + phone[-9:]
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(phone,)).fetchone(); conn.close()
     if FREE_TRIAL_MODE:
-        return jsonify({"active": True, "free_mode": True, "login_count": user['login_count'] if user else 0, "until": "FREE TRIAL"})
+        return jsonify({"active": True, "free_mode": True, "login_count": user['login_count'] if user else 0, "free_logins": FREE_LOGINS, "until": "FREE TRIAL"})
     if not user: return jsonify({"active": False})
-    # Allow free logins
     if (user['login_count'] or 0) <= FREE_LOGINS:
-        return jsonify({"active": True, "free_trial": True, "login_count": user['login_count'], "until": user['subscription_until']})
+        return jsonify({"active": True, "free_trial": True, "login_count": user['login_count'], "free_logins": FREE_LOGINS, "until": user['subscription_until']})
     active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
     latest = [n for n in notif_db if n['phone'] == phone]
     latest = latest[-1] if latest else None
-    return jsonify({"active": active, "until": user['subscription_until'], "phone": phone, "latest_notification": latest})
+    return jsonify({"active": active, "until": user['subscription_until'], "phone": phone, "latest_notification": latest, "login_count": user['login_count'], "free_logins": FREE_LOGINS})
 
 @app.route('/api/my-subscription', methods=['GET'])
 @require_auth
 def my_sub():
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE id=?",(request.user_id,)).fetchone(); conn.close()
     if not user: return jsonify({"active":False}),404
+    lc = user['login_count'] or 0
     if FREE_TRIAL_MODE:
-        return jsonify({"active":True,"free_mode":True,"login_count":user['login_count'],"message":f"FREE TRIAL - Login {user['login_count']}/{FREE_LOGINS}"})
+        return jsonify({"active":True,"free_mode":True,"login_count":lc,"free_logins":FREE_LOGINS,"message":f"FREE TRIAL - Login {lc}/{FREE_LOGINS}"})
     active=False
-    if (user['login_count'] or 0) <= FREE_LOGINS:
-        active=True
+    if lc <= FREE_LOGINS: active=True
     elif user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"login_count":user['login_count'],"free_logins":FREE_LOGINS})
+    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"login_count":lc,"free_logins":FREE_LOGINS})
 
 @app.route('/api/dashboard', methods=['GET'])
 @require_auth
