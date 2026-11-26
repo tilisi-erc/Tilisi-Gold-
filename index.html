@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TILISI GOLD BI v11 - LIVE</title>
+<title>TILISI GOLD BI v11.6 - AUTO PAY</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:Inter,system-ui,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding:12px}
@@ -20,14 +20,16 @@ input,button{width:100%;padding:15px;margin:7px 0;border-radius:12px;border:none
 input{background:#121a2b;color:#fff;border:1px solid #243049}
 button{background:#FFD700;color:#000;font-weight:900;cursor:pointer}
 button.secondary{background:#1e2a44;color:#fff;border:1px solid #2a3a5e}
+button.green{background:#00c853;color:#fff}
 .gate{display:grid;grid-template-columns:1fr 55px 55px;gap:4px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;align-items:center}
 .hidden{display:none}
 small{opacity:0.6}
 h2{margin:10px 0 16px;text-align:center;line-height:1.2}
+.paybox{background:#111a2e;border:1px dashed #FFD700;border-radius:12px;padding:12px;margin:10px 0}
 </style>
 </head>
 <body>
-<h2>TILISI GOLD BI v11<br><small style="font-size:11px">BOS ENGINE + 7 VALIDATORS | Till 9153470</small></h2>
+<h2>TILISI GOLD BI v11.6<br><small style="font-size:11px">AUTO PAY - Till 6899566 | Store 9153470</small></h2>
 
 <div id="authCard" class="card">
 <h3 style="margin:0 0 8px">1. Login / Register</h3>
@@ -39,11 +41,22 @@ h2{margin:10px 0 16px;text-align:center;line-height:1.2}
 </div>
 
 <div id="payCard" class="card hidden">
-<h3 style="margin:0 0 8px">2. Lipa ku-access Engine</h3>
+<h3 style="margin:0 0 8px">2. Lipa ku-access Engine - AUTO</h3>
 <p style="font-size:13px">Status: <span id="subStatus" class="gold">-</span></p>
-<button onclick="pay(500)">LIPA 500 - 7 DAYS</button>
-<button class="secondary" onclick="pay(1500)">LIPA 1500 - 30 DAYS</button>
+
+<div class="paybox">
+<p style="font-size:14px;margin:0"><b>LIPA NA M-PESA - BUY GOODS</b></p>
+<p style="font-size:18px;margin:8px 0">Till: <span class="gold" style="font-size:22px">6899566</span> (FELIX)</p>
+<p style="font-size:13px">Amount: <b>500 = 7 Days</b> | <b>1500 = 30 Days</b></p>
+<small>1. Go to M-Pesa → Buy Goods → Till 6899566<br>2. Enter Amount 500<br>3. Enter PIN<br>4. Click "I Have Paid" below</small>
+</div>
+
+<button class="green" id="iPaidBtn" onclick="iHavePaid()">✅ I HAVE PAID TO TILL 6899566 - CHECK NOW</button>
+<div id="payStatus" style="margin-top:10px;font-weight:bold;font-size:13px;text-align:center;min-height:20px"></div>
 <p id="payMsg" style="font-size:12px;word-break:break-all"></p>
+
+<hr style="opacity:0.2;margin:12px 0">
+<small>Testing? Pay 10 bob to Till 6899566 - will give 1 day access + notification</small>
 </div>
 
 <div id="engineCard" class="card hidden">
@@ -54,12 +67,13 @@ h2{margin:10px 0 16px;text-align:center;line-height:1.2}
 <div style="text-align:center;font-size:12px;line-height:1.6">Conf <b id="conf">0%</b> | <b id="stage">--</b> | <b id="regime">--</b><br>DXY <b id="dxy">--</b> | <b id="time">--</b></div>
 </div>
 
-<div id="gatesCard" class="card hidden"><b style="font-size:12px">7 VALIDATORS (Weighted)</b><div id="gates" style="margin-top:8px"></div></div>
+<div id="gatesCard" class="card hidden"><b style="font-size:12px">7 VALIDATORS</b><div id="gates" style="margin-top:8px"></div></div>
 <div id="aiCard" class="card hidden"><b style="font-size:12px">AI ANALYST</b><div id="ai" style="font-size:12px;margin-top:8px;line-height:1.5;opacity:0.9"></div><div id="inval" style="font-size:11px;margin-top:8px;color:#ff8c8c"></div></div>
 
 <script>
 const API = location.origin;
 let token = localStorage.getItem('tilisi_token');
+let autoCheckInterval = null;
 const $ = id => document.getElementById(id);
 const show = (id, yes) => $(id).classList.toggle('hidden', !yes);
 
@@ -70,13 +84,13 @@ async function register(){
  $('authMsg').innerText='Registering...';
  let r=await fetch(API+'/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
  let d=await r.json(); $('authMsg').innerText=JSON.stringify(d);
- if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); checkSub();}
+ if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone); checkSub();}
 }
 async function login(){
  $('authMsg').innerText='Logging in...';
  let r=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
  let d=await r.json();
- if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); $('authMsg').innerText='Logged in ✓'; checkSub();}
+ if(d.token){token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone); $('authMsg').innerText='Logged in ✓ Phone:'+d.phone; checkSub();}
  else $('authMsg').innerText=JSON.stringify(d);
 }
 async function checkSub(){
@@ -84,18 +98,69 @@ async function checkSub(){
  let r=await fetch(API+'/api/my-subscription',{headers:{'Authorization':'Bearer '+token}});
  let d=await r.json();
  show('payCard', true);
- $('subStatus').innerText = d.active ? 'ACTIVE till '+ (d.until||'') : 'EXPIRED - Lipa chini';
+ $('subStatus').innerText = d.active ? 'ACTIVE till '+ (d.until||'') : 'EXPIRED - Lipa to Till 6899566';
  if(d.active){ show('engineCard',true); show('gatesCard',true); show('aiCard',true); refresh(); setInterval(refresh,10000); }
 }
-async function pay(amount){
- $('payMsg').innerText='Tuma STK... Angalia simu yako '+phoneEl();
- let r=await fetch(API+'/api/pay',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({amount})});
- let d=await r.json(); $('payMsg').innerText=JSON.stringify(d);
+
+// === AUTO PAYMENT DETECTION + NOTIFICATIONS ===
+async function iHavePaid(){
+  let phone = localStorage.getItem('tilisi_phone') || phoneEl();
+  if(!phone){ phone = prompt("Enter phone you paid with (254...)"); if(!phone) return; }
+  phone = phone.replace("+","").replace(" ","");
+  if(phone.startsWith("0")) phone = "254"+phone.slice(1);
+  localStorage.setItem('tilisi_phone', phone);
+
+  if('Notification' in window && Notification.permission !== 'granted'){
+    Notification.requestPermission();
+  }
+
+  $('payStatus').innerText = "⏳ Checking M-Pesa Till 6899566... Waiting for confirmation (auto in 3 sec)";
+  $('payStatus').style.color = "orange";
+  $('payMsg').innerText = "Polling Store 9153470 C2B...";
+
+  let count = 0;
+  if(autoCheckInterval) clearInterval(autoCheckInterval);
+  
+  autoCheckInterval = setInterval(async () => {
+    count++;
+    try {
+      const r = await fetch(API+`/api/notifications/latest?phone=${phone}`);
+      const d = await r.json();
+      console.log("Poll:", d);
+      
+      if(d.active){
+        clearInterval(autoCheckInterval);
+        $('payStatus').innerText = "✅ Payment Received! Active!";
+        $('payStatus').style.color = "#00ff88";
+        $('payMsg').innerText = JSON.stringify(d.latest_notification || d);
+
+        if('Notification' in window && Notification.permission === 'granted'){
+          new Notification("Tilisi Gold ✅ Payment Received!", {
+            body: `KSH ${d.latest_notification?.amount || 500} - Receipt ${d.latest_notification?.receipt || ''} - Active till ${d.until}`,
+          });
+        }
+
+        alert(`✅ PAYMENT CONFIRMED!\nKSH ${d.latest_notification?.amount || ''}\nReceipt: ${d.latest_notification?.receipt || ''}\nActive until: ${d.until}\n\nEngine unlocking...`);
+        checkSub(); // Reload engine
+        return;
+      } else {
+        $('payStatus').innerText = `⏳ Still waiting... ${count*3}s - Did you pay to Till 6899566? (Check ${count}/40)`;
+      }
+    } catch(e){
+      console.log("Poll error", e);
+    }
+    if(count > 40){
+      clearInterval(autoCheckInterval);
+      $('payStatus').innerText = "❌ Not found yet. Wait 30s and click again. Make sure you paid to Till 6899566 (Buy Goods) with same phone.";
+      $('payStatus').style.color = "#ff3b3b";
+    }
+  }, 3000);
 }
+
 async function refresh(){
  try{
   let r=await fetch(API+'/api/dashboard',{headers:{'Authorization':'Bearer '+token}});
-  if(r.status===402){$('subStatus').innerText='PAYMENT REQUIRED - Lipa'; return;}
+  if(r.status===402){$('subStatus').innerText='PAYMENT REQUIRED - Lipa to Till 6899566'; return;}
   let d=await r.json();
   if(d.error){$('subStatus').innerText=d.error; return;}
   $('gold').innerText='$'+d.gold;
@@ -118,4 +183,4 @@ async function refresh(){
 if(token){ checkSub(); }
 </script>
 </body>
-</html>
+ </html>                                             </html>
