@@ -1,6 +1,5 @@
-# TILISI GOLD BI v11.6
-# Live: https://tilisi-gold-bi.onrender.com
-import os, base64, requests, json, time, random, threading, sqlite3, secrets, jwt
+# TILISI GOLD BI v11.6.1 - FIXED 404 - FULL FILE
+import os, base64, requests, json, time, random, sqlite3, secrets, jwt
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, jsonify, request, Response
@@ -13,22 +12,21 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET", secrets.token_hex(32))
+print("=== TILISI v11.6.1 LOADED ===")
 
-# ===== CONFIG - CORRECT FOR YOUR PRODUCTION APP =====
-TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))  # Customer pays to this
-STORE_NUMBER = int(os.getenv("STORE_NUMBER", 9153470))  # C2B approved shortcode
-SHORTCODE = STORE_NUMBER  # For C2B registration
+TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))
+STORE_NUMBER = int(os.getenv("STORE_NUMBER", 9153470))
+SHORTCODE = STORE_NUMBER
 
 CONSUMER_KEY = os.getenv("MPESA_CONSUMER_KEY")
 CONSUMER_SECRET = os.getenv("MPESA_CONSUMER_SECRET")
-PASSKEY = os.getenv("MPESA_PASSKEY")  # Not needed for C2B, but keep for STK fallback
+PASSKEY = os.getenv("MPESA_PASSKEY")
 BASE_URL = os.getenv("MPESA_BASE_URL", "https://api.safaricom.co.ke")
 CALLBACK_BASE = os.getenv("CALLBACK_BASE", "https://tilisi-gold-bi.onrender.com")
-CALLBACK_URL = f"{CALLBACK_BASE}/api/callback"  # Old STK
+CALLBACK_URL = f"{CALLBACK_BASE}/api/callback"
 C2B_CONFIRMATION_URL = f"{CALLBACK_BASE}/api/c2b/confirmation"
 C2B_VALIDATION_URL = f"{CALLBACK_BASE}/api/c2b/validation"
 
-# ===== FILES =====
 ALERTS_FILE = "tilisi_alerts.json"
 FCM_FILE = "tilisi_fcm.json"
 SUBS_FILE = "subs.json"
@@ -44,7 +42,6 @@ def save_json(path, data):
         with open(path, 'w') as f: json.dump(data, f)
     except: pass
 
-# ===== DB =====
 def init_db():
     conn = sqlite3.connect('tilisi.db')
     c = conn.cursor()
@@ -62,48 +59,19 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# ===== NOTIFICATIONS SYSTEM =====
-def send_fcm_push(token, title, body):
-    try:
-        fcm_key = os.getenv("FCM_SERVER_KEY")
-        if not fcm_key or not token: return False
-        headers = {"Authorization": f"key={fcm_key}", "Content-Type": "application/json"}
-        payload = {
-            "to": token,
-            "notification": {"title": title, "body": body, "sound": "default"},
-            "data": {"type": "payment", "title": title, "body": body, "click_action": "FLUTTER_NOTIFICATION_CLICK"}
-        }
-        r = requests.post("https://fcm.googleapis.com/fcm/send", json=payload, headers=headers, timeout=10)
-        print(f"FCM sent to {token[:10]}: {r.text[:100]}")
-        return True
-    except Exception as e:
-        print(f"FCM error: {e}")
-        return False
-
 def broadcast_notification(phone, amount, receipt, days):
-    """Save notification for polling + try FCM"""
     global notif_db
     notif = {
         "id": int(time.time()*1000),
-        "phone": phone,
-        "amount": amount,
-        "receipt": receipt,
-        "days": days,
+        "phone": phone, "amount": amount, "receipt": receipt, "days": days,
         "title": "Payment Received!",
         "body": f"KSH {amount} received for Till {TILL_NUMBER}. {days} days activated. Receipt: {receipt}",
-        "timestamp": datetime.now().isoformat(),
-        "read": False
+        "timestamp": datetime.now().isoformat(), "read": False
     }
     notif_db.append(notif)
-    # Keep only last 200
     if len(notif_db) > 200: notif_db = notif_db[-200:]
     save_json(NOTIF_FILE, notif_db)
-    
-    # Try FCM to all tokens
-    for tok in fcm_tokens[-10:]:  # Last 10 tokens
-        send_fcm_push(tok, notif["title"], notif["body"])
 
-# ===== PRICE FEEDS =====
 def get_gold_price():
     for url in ['https://api.gold-api.com/price/XAU','https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT']:
         try:
@@ -129,7 +97,6 @@ def update_asia_range(price):
         asia_data["high"] = max(asia_data["high"], price); asia_data["low"] = min(asia_data["low"], price)
     return asia_data["high"], asia_data["low"]
 
-# ===== V9 BOS ENGINE =====
 def v9_bos_engine(gold_price=None, dxy_val=None):
     if gold_price is None: gold_price = get_gold_price()
     if dxy_val is None: dxy_val = get_dxy()
@@ -142,12 +109,10 @@ def v9_bos_engine(gold_price=None, dxy_val=None):
     if gold_price > bos_buy_level: bos_active=True; bos_type="BUY"
     elif gold_price < bos_sell_level: bos_active=True; bos_type="SELL"
     if not bos_active:
-        return {"engine_status": "SCANNING","engine_note": f"Asia {asia_low:.1f}-{asia_high:.1f} | BOS BUY >{bos_buy_level:.1f} SELL <{bos_sell_level:.1f}",
+        return {"engine_status": "SCANNING","engine_note": f"Asia {asia_low:.1f}-{asia_high:.1f}",
                 "bos_levels": {"high": round(asia_high,2),"low": round(asia_low,2),"buy_trigger": round(bos_buy_level,2),"sell_trigger": round(bos_sell_level,2)},
-                "signal": "WAIT","confidence": 0,"bos_up": False,"should_notify": False,"notify_stage": "NONE",
-                "gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": 55,"regime": "SCANNING","buy_pass":0,"sell_pass":0,"gates":{},
-                "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT",
-                "ai_analyst": f"ENGINE IDLE - Waiting Asia Breakout ${asia_low:.0f}-${asia_high:.0f}","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
+                "signal": "WAIT","confidence": 0,"bos_up": False,"gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": 55,"regime": "SCANNING","gates":{},
+                "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"IDLE ${asia_low:.0f}-${asia_high:.0f}","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
     gates = {}
     if dxy_val < 99.8: g1_buy,g1_sell="PASS","FAIL"
     elif dxy_val > 100.8: g1_buy,g1_sell="FAIL","PASS"
@@ -192,17 +157,13 @@ def v9_bos_engine(gold_price=None, dxy_val=None):
             if score_sell >= 0.70: signal, conf, stage = "SELL", int(score_sell*100), "CONFIRMED"
             elif score_sell >= 0.40: signal, conf, stage = "WAIT", int(score_sell*100), "WEAK_BOS"
             else: signal, conf, stage = "WAIT", int(score_sell*100), "BOS_UP"
-    return {"engine_status": f"BOS {bos_type} ACTIVE","engine_note": f"BOS {bos_type} {gold_price:.1f} | Trigger {bos_buy_level if bos_type=='BUY' else bos_sell_level:.1f}",
+    return {"engine_status": f"BOS {bos_type} ACTIVE","engine_note": f"BOS {bos_type} {gold_price:.1f}",
             "bos_levels": {"high": round(asia_high,2),"low": round(asia_low,2),"buy_trigger": round(bos_buy_level,2),"sell_trigger": round(bos_sell_level,2)},
-            "bos_type": bos_type,"bos_up": True,"should_notify": stage in ["BOS_UP","CONFIRMED"],"notify_stage": stage,
-            "gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": rsi,"regime": "TRENDING" if g2_buy=="PASS" or gates['G2_TREND']['sell_status']=="PASS" else "RANGING",
-            "signal": signal,"confidence": conf,"score_buy": round(score_buy,2),"score_sell": round(score_sell,2),
-            "buy_pass": sum(1 for g in gates.values() if g['buy_status']=="PASS"),"sell_pass": sum(1 for g in gates.values() if g['sell_status']=="PASS"),"gates": gates,
-            "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT",
-            "ai_analyst": f"ENGINE {bos_type} | Score BUY:{score_buy:.2f} SELL:{score_sell:.2f} | {sess}",
-            "invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
+            "bos_type": bos_type,"bos_up": True,"signal": signal,"confidence": conf,"gold": round(gold_price,2),"dxy": round(dxy_val,2),"rsi": rsi,
+            "regime": "TRENDING" if g2_buy=="PASS" or gates['G2_TREND']['sell_status']=="PASS" else "RANGING",
+            "notify_stage": stage,"score_buy": round(score_buy,2),"score_sell": round(score_sell,2),"gates": gates,
+            "timestamp": f"{datetime.utcnow().strftime('%H:%M:%S')} / {eat_hour}:00 EAT","ai_analyst": f"ENGINE {bos_type}","invalidation": f"BUY <{bos_sell_level:.0f} | SELL >{bos_buy_level:.0f}"}
 
-# ===== AUTH =====
 def create_token(user_id):
     return jwt.encode({"user_id": user_id, "exp": datetime.utcnow() + timedelta(days=7)}, app.config['SECRET_KEY'], algorithm="HS256")
 
@@ -229,15 +190,23 @@ def require_subscription(f):
         return f(*args, **kwargs)
     return decorated
 
-# ===== M-PESA TOKEN =====
 def get_access_token():
     if not CONSUMER_KEY or not CONSUMER_SECRET:
-        raise Exception("MPESA_CONSUMER_KEY / SECRET missing in Render Env")
+        raise Exception("MPESA_CONSUMER_KEY / SECRET missing")
     b64_auth = base64.b64encode(f"{CONSUMER_KEY}:{CONSUMER_SECRET}".encode()).decode()
     r = requests.get(f"{BASE_URL}/oauth/v1/generate?grant_type=client_credentials", headers={"Authorization": f"Basic {b64_auth}"}, timeout=15)
     r.raise_for_status(); return r.json()["access_token"]
 
-# ===== ROUTES =====
+@app.route('/')
+def index():
+    if os.path.exists("index.html"):
+        try: return Response(open("index.html", encoding="utf-8").read(), mimetype='text/html')
+        except: pass
+    return jsonify({"app":"Tilisi Gold BI v11.6.1 FIXED","till":TILL_NUMBER,"store":STORE_NUMBER,"status":"LIVE","routes":["/health","/api/status","/api/c2b/register"]})
+
+@app.route('/health')
+def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"store":STORE_NUMBER,"version":"11.6.1","time":datetime.utcnow().isoformat()})
+
 @app.route('/api/status')
 def api_status(): return jsonify(v9_bos_engine())
 
@@ -265,136 +234,107 @@ def login():
     if not raw.startswith("254"): raw = "254" + raw[-9:]
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone(); conn.close()
     if not user or not check_password_hash(user['password'], data.get('password','')): return jsonify({"error":"Invalid phone or password"}),401
-    token = create_token(user['id']); active = False
+    token = create_token(user['id']); active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
     return jsonify({"token":token,"phone":user['phone'],"subscription_active":active,"subscription_until":user['subscription_until'],"need_payment": not active})
 
-# ===== C2B AUTO - FOR TILL 6899566 VIA STORE 9153470 =====
 @app.route('/api/c2b/register', methods=['GET','POST'])
 def c2b_register():
-    """Call once to register URLs for Store 9153470"""
     try:
         token = get_access_token()
-        payload = {
-            "ShortCode": STORE_NUMBER,  # 9153470
-            "ResponseType": "Completed",
-            "ConfirmationURL": C2B_CONFIRMATION_URL,
-            "ValidationURL": C2B_VALIDATION_URL
-        }
-        print(f"Registering C2B for Store {STORE_NUMBER}: {payload}")
+        payload = {"ShortCode": STORE_NUMBER, "ResponseType": "Completed", "ConfirmationURL": C2B_CONFIRMATION_URL, "ValidationURL": C2B_VALIDATION_URL}
+        print(f"Registering C2B {payload}")
         r = requests.post(f"{BASE_URL}/mpesa/c2b/v1/registerurl", json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-        print(f"C2B Register Response: {r.status_code} {r.text}")
+        print(f"C2B Register {r.status_code} {r.text}")
         return jsonify({"sent": payload, "daraja": r.json(), "status": r.status_code})
     except Exception as e:
-        print(f"C2B Register Error: {e}")
+        print(f"C2B Error {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/c2b/validation', methods=['POST'])
 def c2b_validation():
-    data = request.get_json() or {}
-    print(f"C2B VALIDATION: {json.dumps(data)}")
+    print(f"C2B VALIDATION: {request.get_data()}")
     return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 @app.route('/api/c2b/confirmation', methods=['POST'])
 def c2b_confirmation():
-    """AUTOMATIC PAYMENT DETECTION - Money to Till 6899566 triggers this via Store 9153470"""
     data = request.get_json() or {}
-    print(f"C2B CONFIRMATION AUTO: {json.dumps(data)}")
+    print(f"C2B CONFIRMATION: {json.dumps(data)}")
     try:
         trans_id = data.get('TransID')
         trans_amount = data.get('TransAmount')
         phone = data.get('MSISDN')
-        bill_ref = data.get('BillRefNumber', '')
-        
         if not trans_id or not phone:
             return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
-        
         amount = int(float(trans_amount or 0))
         conn = get_db()
-        
-        # Prevent duplicate
         if conn.execute("SELECT * FROM payments WHERE mpesa_receipt=?", (trans_id,)).fetchone():
             conn.close()
             return jsonify({"ResultCode":0,"ResultDesc":"Already processed"})
-        
-        # Find or create user by phone
         user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         if not user:
-            conn.execute("INSERT INTO users (phone,password,created_at) VALUES (?,?,?)",
-                         (phone, generate_password_hash(phone[-4:]), datetime.now().isoformat()))
+            conn.execute("INSERT INTO users (phone,password,created_at) VALUES (?,?,?)",(phone, generate_password_hash(phone[-4:]), datetime.now().isoformat()))
             conn.commit()
             user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
-            print(f"Auto-created user for phone {phone}")
-        
-        # Determine days
         days = 30 if amount >= 1500 else 7
-        if amount < 100:  # Test payment 10 bob = 1 day for testing
-            days = 1
-        
+        if amount < 100: days = 1
         until = datetime.now() + timedelta(days=days)
-        conn.execute("INSERT INTO payments (user_id,phone,amount,mpesa_receipt,status,created_at) VALUES (?,?,?,?,?,?)",
-                     (user['id'], phone, amount, trans_id, 'COMPLETED', datetime.now().isoformat()))
-        conn.execute("UPDATE users SET subscription_until=?, is_active=1 WHERE id=?",
-                     (until.isoformat(), user['id']))
+        conn.execute("INSERT INTO payments (user_id,phone,amount,mpesa_receipt,status,created_at) VALUES (?,?,?,?,?,?)",(user['id'], phone, amount, trans_id, 'COMPLETED', datetime.now().isoformat()))
+        conn.execute("UPDATE users SET subscription_until=?, is_active=1 WHERE id=?",(until.isoformat(), user['id']))
         conn.commit(); conn.close()
-        
-        subs_db[phone] = until.isoformat()
-        save_json(SUBS_FILE, subs_db)
-        
-        # NOTIFICATIONS
+        subs_db[phone] = until.isoformat(); save_json(SUBS_FILE, subs_db)
         broadcast_notification(phone, amount, trans_id, days)
-        
-        print(f"✅ AUTO ACTIVATED {phone} amount={amount} receipt={trans_id} until={until}")
-        
+        print(f"✅ AUTO ACTIVATED {phone} amount={amount} receipt={trans_id}")
     except Exception as e:
-        print(f"C2B CONFIRMATION ERROR: {e}")
-    
+        print(f"C2B CONF ERROR {e}")
     return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
-
-# ===== NOTIFICATION POLLING FOR FRONTEND =====
-@app.route('/api/notifications', methods=['GET'])
-@require_auth
-def get_notifications():
-    """Frontend polls this for payment confirmation"""
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE id=?", (request.user_id,)).fetchone()
-    conn.close()
-    if not user: return jsonify([])
-    phone = user['phone']
-    # Return notifications for this phone
-    user_notifs = [n for n in notif_db if n['phone'] == phone][-10:]
-    return jsonify(user_notifs)
 
 @app.route('/api/notifications/latest', methods=['GET'])
 def latest_notification():
-    """Public polling for auto-unlock after payment - no auth needed, uses phone query"""
     phone = request.args.get('phone','')
     if not phone: return jsonify({"active": False})
     phone = phone.replace("+","").replace(" ","")
     if phone.startswith("0"): phone = "254" + phone[1:]
     if not phone.startswith("254"): phone = "254" + phone[-9:]
-    
-    conn = get_db()
-    user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
-    conn.close()
+    conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(phone,)).fetchone(); conn.close()
     if not user: return jsonify({"active": False})
-    
-    active = False
+    active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    
-    # Get latest payment
     latest = [n for n in notif_db if n['phone'] == phone]
     latest = latest[-1] if latest else None
-    
-    return jsonify({
-        "active": active,
-        "until": user['subscription_until'],
-        "phone": phone,
-        "latest_notification": latest
-    })
+    return jsonify({"active": active, "until": user['subscription_until'], "phone": phone, "latest_notification": latest})
 
-# ===== OLD STK (kept for fallback but w
+@app.route('/api/my-subscription', methods=['GET'])
+@require_auth
+def my_sub():
+    conn = get_db(); user = conn.execute("SELECT * FROM users WHERE id=?",(request.user_id,)).fetchone(); conn.close()
+    if not user: return jsonify({"active":False}),404
+    active=False
+    if user['subscription_until']:
+        try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
+        except: pass
+    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"till":TILL_NUMBER,"store":STORE_NUMBER})
+
+@app.route('/api/dashboard', methods=['GET'])
+@require_auth
+@require_subscription
+def dashboard(): return jsonify(v9_bos_engine())
+
+@app.route('/api/callback', methods=['POST'])
+def callback():
+    print(f"STK CALLBACK: {request.get_data()}")
+    return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
+
+@app.route('/api/fcm/register', methods=['POST'])
+def api_fcm_reg():
+    global fcm_tokens
+    token=(request.json or {}).get('token')
+    if token and token not in fcm_tokens: fcm_tokens.append(token); save_json(FCM_FILE, fcm_tokens)
+    return jsonify({"ok":True})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
