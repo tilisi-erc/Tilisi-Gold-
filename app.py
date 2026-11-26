@@ -1,4 +1,4 @@
-# TILISI GOLD BI v11.6.1 - FIXED 404 - FULL FILE
+# TILISI GOLD BI v14 - FREE TRIAL + 3 LOGINS - DARAJA READY BUT BYPASSED
 import os, base64, requests, json, time, random, sqlite3, secrets, jwt
 from datetime import datetime, timedelta
 from functools import wraps
@@ -12,7 +12,11 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET", secrets.token_hex(32))
-print("=== TILISI v11.6.1 LOADED ===")
+print("=== TILISI v14 FREE TRIAL LOADED ===")
+
+# === FREE TRIAL SWITCH ===
+FREE_TRIAL_MODE = True  # True = FREE for all now. False = Enforce 3 logins then paywall + STK
+FREE_LOGINS = 3
 
 TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))
 STORE_NUMBER = int(os.getenv("STORE_NUMBER", 9153470))
@@ -47,7 +51,10 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (id INTEGER PRIMARY KEY, phone TEXT UNIQUE, email TEXT, 
-                  password TEXT, created_at TEXT, subscription_until TEXT, is_active INTEGER DEFAULT 0)''')
+                  password TEXT, created_at TEXT, subscription_until TEXT, is_active INTEGER DEFAULT 0, login_count INTEGER DEFAULT 0)''')
+    # Migration for old DB
+    try: c.execute("ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0")
+    except: pass
     c.execute('''CREATE TABLE IF NOT EXISTS payments 
                  (id INTEGER PRIMARY KEY, user_id INTEGER, phone TEXT, amount INTEGER, 
                   checkout_id TEXT, mpesa_receipt TEXT, status TEXT, created_at TEXT)''')
@@ -182,7 +189,13 @@ def require_auth(f):
 def require_subscription(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        if FREE_TRIAL_MODE:
+            return f(*args, **kwargs)
         conn = get_db(); user = conn.execute("SELECT * FROM users WHERE id=?", (request.user_id,)).fetchone(); conn.close()
+        if not user: return jsonify({"error":"No user"}),401
+        # Check if still in free logins
+        if (user['login_count'] or 0) <= FREE_LOGINS:
+            return f(*args, **kwargs)
         if not user or not user['subscription_until']: return jsonify({"error":"No subscription","need_pay":True}),402
         try:
             if datetime.fromisoformat(user['subscription_until']) < datetime.now(): return jsonify({"error":"Expired","need_pay":True}),402
@@ -202,10 +215,10 @@ def index():
     if os.path.exists("index.html"):
         try: return Response(open("index.html", encoding="utf-8").read(), mimetype='text/html')
         except: pass
-    return jsonify({"app":"Tilisi Gold BI v11.6.1 FIXED","till":TILL_NUMBER,"store":STORE_NUMBER,"status":"LIVE","routes":["/health","/api/status","/api/c2b/register"]})
+    return jsonify({"app":"Tilisi Gold BI v14 FREE TRIAL","till":TILL_NUMBER,"free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"status":"LIVE"})
 
 @app.route('/health')
-def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"store":STORE_NUMBER,"version":"11.6.1","time":datetime.utcnow().isoformat()})
+def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"store":STORE_NUMBER,"version":"14 FREE TRIAL","free_mode":FREE_TRIAL_MODE,"free_logins":FREE_LOGINS,"time":datetime.utcnow().isoformat()})
 
 @app.route('/api/status')
 def api_status(): return jsonify(v9_bos_engine())
@@ -220,9 +233,9 @@ def register():
     if not phone or not password: return jsonify({"error":"phone and password required"}),400
     conn = get_db()
     try:
-        conn.execute("INSERT INTO users (phone,email,password,created_at) VALUES (?,?,?,?)",(phone,email,generate_password_hash(password),datetime.now().isoformat()))
+        conn.execute("INSERT INTO users (phone,email,password,created_at,login_count) VALUES (?,?,?,?,?)",(phone,email,generate_password_hash(password),datetime.now().isoformat(),1))
         conn.commit(); user = conn.execute("SELECT id FROM users WHERE phone=?",(phone,)).fetchone()
-        token = create_token(user['id']); return jsonify({"message":"Registered","phone":phone,"token":token,"need_payment":True})
+        token = create_token(user['id']); return jsonify({"message":"Registered - 3 free logins!","phone":phone,"token":token,"need_payment":False,"login_count":1,"free_mode":FREE_TRIAL_MODE})
     except sqlite3.IntegrityError: return jsonify({"error":"Phone exists, login"}),400
     finally: conn.close()
 
@@ -232,36 +245,51 @@ def login():
     raw = data.get('phone','').replace("+","").replace(" ","")
     if raw.startswith("0"): raw = "254" + raw[1:]
     if not raw.startswith("254"): raw = "254" + raw[-9:]
-    conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone(); conn.close()
-    if not user or not check_password_hash(user['password'], data.get('password','')): return jsonify({"error":"Invalid phone or password"}),401
-    token = create_token(user['id']); active=False
+    conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone()
+    if not user or not check_password_hash(user['password'], data.get('password','')):
+        conn.close(); return jsonify({"error":"Invalid phone or password"}),401
+    
+    # Increment login count
+    new_count = (user['login_count'] or 0) + 1
+    conn.execute("UPDATE users SET login_count=? WHERE id=?",(new_count, user['id']))
+    conn.commit()
+    user = conn.execute("SELECT * FROM users WHERE phone=?",(raw,)).fetchone()
+    conn.close()
+    
+    token = create_token(user['id'])
+    active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    return jsonify({"token":token,"phone":user['phone'],"subscription_active":active,"subscription_until":user['subscription_until'],"need_payment": not active})
+    
+    # Logic: 3 free logins
+    need_payment = False
+    if not active and not FREE_TRIAL_MODE and new_count > FREE_LOGINS:
+        need_payment = True
+    
+    if need_payment:
+        return jsonify({"token":token,"phone":user['phone'],"subscription_active":False,"need_payment":True,"login_count":new_count,"message":f"Free trials ended ({FREE_LOGINS}/{FREE_LOGINS}). Please pay to continue on 4th login.","free_mode":FREE_TRIAL_MODE}),402
+    
+    msg = f"Login {new_count}/{FREE_LOGINS} free" if new_count <= FREE_LOGINS else "Free trial mode - Enjoy!"
+    return jsonify({"token":token,"phone":user['phone'],"subscription_active":active or FREE_TRIAL_MODE,"subscription_until":user['subscription_until'],"need_payment":False,"login_count":new_count,"message":msg,"free_mode":FREE_TRIAL_MODE})
 
 @app.route('/api/c2b/register', methods=['GET','POST'])
 def c2b_register():
     try:
         token = get_access_token()
         payload = {"ShortCode": STORE_NUMBER, "ResponseType": "Completed", "ConfirmationURL": C2B_CONFIRMATION_URL, "ValidationURL": C2B_VALIDATION_URL}
-        print(f"Registering C2B {payload}")
         r = requests.post(f"{BASE_URL}/mpesa/c2b/v1/registerurl", json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-        print(f"C2B Register {r.status_code} {r.text}")
         return jsonify({"sent": payload, "daraja": r.json(), "status": r.status_code})
     except Exception as e:
-        print(f"C2B Error {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/c2b/validation', methods=['POST'])
 def c2b_validation():
-    print(f"C2B VALIDATION: {request.get_data()}")
     return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 @app.route('/api/c2b/confirmation', methods=['POST'])
 def c2b_confirmation():
     data = request.get_json() or {}
-    print(f"C2B CONFIRMATION: {json.dumps(data)}")
     try:
         trans_id = data.get('TransID')
         trans_amount = data.get('TransAmount')
@@ -275,7 +303,7 @@ def c2b_confirmation():
             return jsonify({"ResultCode":0,"ResultDesc":"Already processed"})
         user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         if not user:
-            conn.execute("INSERT INTO users (phone,password,created_at) VALUES (?,?,?)",(phone, generate_password_hash(phone[-4:]), datetime.now().isoformat()))
+            conn.execute("INSERT INTO users (phone,password,created_at,login_count) VALUES (?,?,?,?)",(phone, generate_password_hash(phone[-4:]), datetime.now().isoformat(),0))
             conn.commit()
             user = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
         days = 30 if amount >= 1500 else 7
@@ -286,7 +314,6 @@ def c2b_confirmation():
         conn.commit(); conn.close()
         subs_db[phone] = until.isoformat(); save_json(SUBS_FILE, subs_db)
         broadcast_notification(phone, amount, trans_id, days)
-        print(f"✅ AUTO ACTIVATED {phone} amount={amount} receipt={trans_id}")
     except Exception as e:
         print(f"C2B CONF ERROR {e}")
     return jsonify({"ResultCode":0,"ResultDesc":"Accepted"})
@@ -294,12 +321,17 @@ def c2b_confirmation():
 @app.route('/api/notifications/latest', methods=['GET'])
 def latest_notification():
     phone = request.args.get('phone','')
-    if not phone: return jsonify({"active": False})
+    if not phone: return jsonify({"active": FREE_TRIAL_MODE, "free_mode": FREE_TRIAL_MODE})
     phone = phone.replace("+","").replace(" ","")
     if phone.startswith("0"): phone = "254" + phone[1:]
     if not phone.startswith("254"): phone = "254" + phone[-9:]
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE phone=?",(phone,)).fetchone(); conn.close()
+    if FREE_TRIAL_MODE:
+        return jsonify({"active": True, "free_mode": True, "login_count": user['login_count'] if user else 0, "until": "FREE TRIAL"})
     if not user: return jsonify({"active": False})
+    # Allow free logins
+    if (user['login_count'] or 0) <= FREE_LOGINS:
+        return jsonify({"active": True, "free_trial": True, "login_count": user['login_count'], "until": user['subscription_until']})
     active=False
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
@@ -313,11 +345,15 @@ def latest_notification():
 def my_sub():
     conn = get_db(); user = conn.execute("SELECT * FROM users WHERE id=?",(request.user_id,)).fetchone(); conn.close()
     if not user: return jsonify({"active":False}),404
+    if FREE_TRIAL_MODE:
+        return jsonify({"active":True,"free_mode":True,"login_count":user['login_count'],"message":f"FREE TRIAL - Login {user['login_count']}/{FREE_LOGINS}"})
     active=False
-    if user['subscription_until']:
+    if (user['login_count'] or 0) <= FREE_LOGINS:
+        active=True
+    elif user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"till":TILL_NUMBER,"store":STORE_NUMBER})
+    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"login_count":user['login_count'],"free_logins":FREE_LOGINS})
 
 @app.route('/api/dashboard', methods=['GET'])
 @require_auth
