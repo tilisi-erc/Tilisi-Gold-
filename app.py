@@ -1,4 +1,4 @@
-# TILISI GOLD BI v11.2
+# TILISI GOLD BI v11.3 - FIXED 404.001.01
 # Live: https://tilisi-gold-bi.onrender.com
 import os, base64, requests, json, time, random, threading, sqlite3, secrets, jwt
 from datetime import datetime, timedelta
@@ -14,13 +14,16 @@ app = Flask(__name__)
 CORS(app)
 app.config['SECRET_KEY'] = os.getenv("JWT_SECRET", secrets.token_hex(32))
 
-# ===== CONFIG - CORRECT FOR YOUR BUSINESS =====
-STORE_NUMBER = int(os.getenv("SHORTCODE", 9153470))  # Store 9153470 - triggers STK
-TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))  # Till 6899566 FELIX - receives money
-SHORTCODE = STORE_NUMBER  # for backwards compat
+# ===== CONFIG - FIXED =====
+# FIX: Daraja does NOT allow Store 9153470 -> Till 6899566 split. Must be SAME.
+# Money will land in Till 6899566 FELIX which is whitelisted
+TILL_NUMBER = int(os.getenv("TILL_NUMBER", 6899566))
+STORE_NUMBER = TILL_NUMBER  # Must be same
+SHORTCODE = TILL_NUMBER
+
 CONSUMER_KEY = os.getenv("MPESA_CONSUMER_KEY")
 CONSUMER_SECRET = os.getenv("MPESA_CONSUMER_SECRET")
-PASSKEY = os.getenv("MPESA_PASSKEY")
+PASSKEY = os.getenv("MPESA_PASSKEY") # IMPORTANT: Must be Passkey for Till 6899566, not 9153470
 BASE_URL = "https://api.safaricom.co.ke"
 CALLBACK_URL = os.getenv("CALLBACK_URL", "https://tilisi-gold-bi.onrender.com/api/callback")
 
@@ -189,8 +192,10 @@ def require_subscription(f):
         return f(*args, **kwargs)
     return decorated
 
-# ===== M-PESA =====
+# ===== M-PESA - FIXED =====
 def get_access_token():
+    if not CONSUMER_KEY or not CONSUMER_SECRET:
+        raise Exception("MPESA_CONSUMER_KEY / SECRET missing in Render Env")
     b64_auth = base64.b64encode(f"{CONSUMER_KEY}:{CONSUMER_SECRET}".encode()).decode()
     r = requests.get(f"{BASE_URL}/oauth/v1/generate?grant_type=client_credentials", headers={"Authorization": f"Basic {b64_auth}"}, timeout=15)
     r.raise_for_status()
@@ -243,54 +248,62 @@ def login():
 def stk_push():
     data = request.get_json() or {}
     amount = int(data.get('amount', 500))
+    if amount not in [500, 1500]:
+        amount = 500
     conn = get_db()
     user = conn.execute("SELECT * FROM users WHERE id=?",(request.user_id,)).fetchone()
     if not user: conn.close(); return jsonify({"error":"User not found"}),404
-    phone = user['phone']  # already cleaned 254...
+    phone = user['phone']
     try:
         access_token = get_access_token()
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        password = base64.b64encode(f"{STORE_NUMBER}{PASSKEY}{timestamp}".encode()).decode()
+        # Password must be for SAME till 6899566
+        password = base64.b64encode(f"{TILL_NUMBER}{PASSKEY}{timestamp}".encode()).decode()
         payload = {
-            "BusinessShortCode": STORE_NUMBER,      # 9153470 - Store triggers STK
+            "BusinessShortCode": TILL_NUMBER,      # 6899566
             "Password": password,
             "Timestamp": timestamp,
-            "TransactionType": "CustomerBuyGoodsOnline",
+            "TransactionType": "CustomerBuyGoodsOnline", # Buy Goods Till
             "Amount": amount,
             "PartyA": phone,               # User phone - STK goes to user
-            "PartyB": TILL_NUMBER,         # 6899566 FELIX - money lands here
-            "PhoneNumber": phone,          # STK push to user
+            "PartyB": TILL_NUMBER,         # 6899566 FELIX - same as BusinessShortCode
+            "PhoneNumber": phone,
             "CallBackURL": CALLBACK_URL,
             "AccountReference": "TilisiGold",
-            "TransactionDesc": "Tilisi Gold BI Access"
+            "TransactionDesc": f"Tilisi Gold BI {amount} Access"
         }
-        print(f"STK PUSH -> User:{phone} | Store:{STORE_NUMBER} | Till:{TILL_NUMBER} | Amount:{amount}")
-        resp = requests.post(f"{BASE_URL}/mpesa/stkpush/v1/processquery", json=payload, headers={"Authorization": f"Bearer {access_token}"}, timeout=20).json()
-        print(f"Daraja: {resp}")
+        print(f"STK PUSH -> Phone:{phone} | Till:{TILL_NUMBER} | Amount:{amount} | CB:{CALLBACK_URL}")
+        print(f"Payload: {payload}")
+        resp_raw = requests.post(f"{BASE_URL}/mpesa/stkpush/v1/processquery", json=payload, headers={"Authorization": f"Bearer {access_token}"}, timeout=20)
+        print(f"Daraja Status {resp_raw.status_code} Body {resp_raw.text}")
+        resp = resp_raw.json()
         if resp.get('ResponseCode')=='0':
             conn.execute("INSERT INTO payments (user_id,phone,amount,checkout_id,status,created_at) VALUES (?,?,?,?,?,?)",(request.user_id,phone,amount,resp.get('CheckoutRequestID'),'PENDING',datetime.now().isoformat()))
             conn.commit()
-        conn.close()
-        return jsonify(resp)
+            conn.close()
+            return jsonify({"ok":True,"message":"STK sent to phone, enter PIN","CheckoutRequestID":resp.get('CheckoutRequestID'),"CustomerMessage":resp.get('CustomerMessage')})
+        else:
+            conn.close()
+            return jsonify({"ok":False,"daraja":resp,"hint":"Check PASSKEY is for Till 6899566 and Till is whitelisted in Daraja Lipa Na M-Pesa Online"}),400
     except Exception as e:
         conn.close()
         print(f"STK Error: {e}")
-        return jsonify({"error":str(e)}),500
+        return jsonify({"ok":False,"error":str(e)}),500
 
 @app.route('/api/callback', methods=['POST'])
 def callback():
     data = request.get_json() or {}
-    print(f"CALLBACK: {data}")
+    print(f"CALLBACK: {json.dumps(data)}")
     try:
         stk = data.get('Body',{}).get('stkCallback',{})
         checkout_id = stk.get('CheckoutRequestID'); result_code = stk.get('ResultCode')
         conn = get_db()
         if result_code==0:
             items = {x['Name']: x.get('Value') for x in stk.get('CallbackMetadata',{}).get('Item',[])}
-            receipt = items.get('MpesaReceiptNumber'); amount = items.get('Amount',500)
+            receipt = items.get('MpesaReceiptNumber'); amount = int(items.get('Amount',500))
             payment = conn.execute("SELECT * FROM payments WHERE checkout_id=?",(checkout_id,)).fetchone()
             if payment:
-                days = 30 if int(amount)>=1500 else 7
+                days = 30 if amount>=1500 else 7
                 until = datetime.now() + timedelta(days=days)
                 conn.execute("UPDATE payments SET status=?,mpesa_receipt=? WHERE checkout_id=?",('COMPLETED',receipt,checkout_id))
                 conn.execute("UPDATE users SET subscription_until=?,is_active=1 WHERE id=?",(until.isoformat(), payment['user_id']))
@@ -320,7 +333,7 @@ def my_sub():
     if user['subscription_until']:
         try: active = datetime.fromisoformat(user['subscription_until']) > datetime.now()
         except: pass
-    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"store":STORE_NUMBER,"till":TILL_NUMBER})
+    return jsonify({"active":active,"until":user['subscription_until'],"phone":user['phone'],"till":TILL_NUMBER})
 
 @app.route('/api/admin/activate', methods=['POST'])
 @require_auth
@@ -359,10 +372,10 @@ def api_fcm_reg():
 def index():
     if os.path.exists("index.html"):
         return Response(open("index.html", encoding="utf-8").read(), mimetype='text/html')
-    return jsonify({"app":"Tilisi Gold BI v11.2","store":STORE_NUMBER,"till":TILL_NUMBER,"till_name":"FELIX","engine":"BOS + 7 Validators","status":"LIVE","flow":"STK->User Phone | Money->Till 6899566"})
+    return jsonify({"app":"Tilisi Gold BI v11.3 FIXED","till":TILL_NUMBER,"till_name":"FELIX","engine":"BOS + 7 Validators","status":"LIVE","flow":"STK->User Phone | Money->Till 6899566","fix":"404 fixed - BusinessShortCode = PartyB = 6899566"})
 
 @app.route('/health')
-def health(): return jsonify({"status":"ok","store":STORE_NUMBER,"till":TILL_NUMBER,"time":datetime.utcnow().isoformat()})
+def health(): return jsonify({"status":"ok","till":TILL_NUMBER,"time":datetime.utcnow().isoformat()})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
