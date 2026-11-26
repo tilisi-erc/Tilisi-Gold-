@@ -2,46 +2,60 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TILISI GOLD BI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TILISI GOLD BI v15 - GLASS</title>
 <style>
+:root{--sky:#00D4FF;--gold:#FFD700;--silver:#C0C0C0;--black:#060A14;--green:#00FF88;--amber:#FFC300;--red:#FF3B30}
 *{box-sizing:border-box}
-body{font-family:Inter,system-ui,sans-serif;background:#0a0e1a;color:#fff;margin:0;padding:12px}
-.card{background:rgba(255,255,255,0.07);backdrop-filter:blur(12px);border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.12);max-width:480px;margin:12px auto}
-.gold{color:#FFD700;font-weight:900}
-.engine{font-size:12px;font-weight:900;padding:10px;border-radius:10px;text-align:center}
-.engine-SCANNING{background:#1a2332;color:#9aa8bd}
-.engine-ACTIVE{background:rgba(255,215,0,0.15);color:#FFD700;border:1px solid #FFD700}
-.signal{font-size:42px;font-weight:900;text-align:center;margin:12px 0;padding:14px;border-radius:14px;letter-spacing:1px}
-.BUY{color:#00ff88;background:rgba(0,255,136,0.12);border:1px solid #00ff88}
-.SELL{color:#ff3b3b;background:rgba(255,59,59,0.12);border:1px solid #ff3b3b}
-.WAIT{color:#ffcc00;background:rgba(255,204,0,0.12);border:1px solid #ffcc00}
-input,button{width:100%;padding:15px;margin:7px 0;border-radius:12px;border:none;font-size:14px}
-input{background:#121a2b;color:#fff;border:1px solid #243049}
-button{background:#FFD700;color:#000;font-weight:900;cursor:pointer}
-button.secondary{background:#1e2a44;color:#fff;border:1px solid #2a3a5e}
-button.green{background:#00c853;color:#fff}
-.gate{display:grid;grid-template-columns:1fr 55px 55px;gap:4px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;align-items:center}
+body{font-family:Inter,system-ui,sans-serif;background:radial-gradient(1000px at 10% -10%, #0e1a2e 0%, #060A14 60%), #060A14;color:#fff;margin:0;padding:12px 12px 90px}
+.card{background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04));backdrop-filter:blur(22px) saturate(1.2);-webkit-backdrop-filter:blur(22px);border-radius:22px;padding:16px;margin-bottom:12px;border:1px solid rgba(192,192,192,0.18);max-width:480px;margin:12px auto;box-shadow:0 10px 40px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12)}
+.gold{color:var(--gold);font-weight:900}
+.sky{color:var(--sky);font-weight:900}
+.silver{color:var(--silver)}
+.engine{font-size:11px;font-weight:900;padding:10px;border-radius:12px;text-align:center;letter-spacing:0.5px;border:1px solid rgba(192,192,192,0.15)}
+.engine-SCANNING{background:rgba(26,35,50,0.7);color:var(--silver)}
+.engine-ACTIVE{background:rgba(255,215,0,0.14);color:var(--gold);border:1px solid var(--gold);box-shadow:0 0 18px rgba(255,215,0,0.2)}
+.signal{font-size:44px;font-weight:900;text-align:center;margin:12px 0;padding:14px;border-radius:18px;letter-spacing:1px;transition:0.4s}
+.BUY{color:var(--green);background:rgba(0,255,136,0.12);border:1px solid var(--green);box-shadow:0 0 22px rgba(0,255,136,0.25)}
+.SELL{color:var(--red);background:rgba(255,59,59,0.12);border:1px solid var(--red);box-shadow:0 0 22px rgba(255,59,59,0.25)}
+.WAIT{color:var(--amber);background:rgba(255,204,0,0.12);border:1px solid var(--amber)}
+.price-up{color:var(--green) !important;text-shadow:0 0 14px var(--green)}
+.price-down{color:var(--red) !important;text-shadow:0 0 14px var(--red)}
+input,button{width:100%;padding:14px;margin:7px 0;border-radius:14px;border:none;font-size:14px}
+input{background:rgba(18,26,43,0.9);color:#fff;border:1px solid rgba(192,192,192,0.18)}
+button{background:linear-gradient(90deg,var(--sky),var(--gold));color:#000;font-weight:900;cursor:pointer}
+button.secondary{background:rgba(30,42,68,0.9);color:#fff;border:1px solid rgba(192,192,192,0.18)}
+button.green{background:linear-gradient(180deg,#00c853,#009624);color:#fff}
+.gate{display:grid;grid-template-columns:1fr 60px 60px;gap:4px;padding:10px 0;border-bottom:1px solid rgba(192,192,192,0.08);font-size:11px;align-items:center}
+.gate small{opacity:0.7}
+.dot{width:18px;height:8px;border-radius:99px;background:rgba(255,255,255,0.15);display:inline-block}
+.dot.green{background:var(--green);box-shadow:0 0 8px var(--green)}
+.dot.amber{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.dot.red{background:var(--red);box-shadow:0 0 8px var(--red)}
 .hidden{display:none !important}
 small{opacity:0.6}
 h2{margin:10px 0 16px;text-align:center;line-height:1.2}
-.paybox{background:#111a2e;border:1px dashed #FFD700;border-radius:12px;padding:12px;margin:10px 0}
-.badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:900}
-.badge-free{background:rgba(0,255,136,0.15);color:#00ff88;border:1px solid #00ff88}
-.badge-pay{background:rgba(255,59,59,0.15);color:#ff3b3b;border:1px solid #ff3b3b}
+.paybox{background:rgba(17,26,46,0.7);border:1px dashed var(--gold);border-radius:14px;padding:12px;margin:10px 0}
+.badge{display:inline-block;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:900}
+.badge-free{background:rgba(0,255,136,0.15);color:var(--green);border:1px solid var(--green)}
+.badge-pay{background:rgba(255,59,59,0.15);color:var(--red);border:1px solid var(--red)}
+.conf-bar{height:7px;background:rgba(255,255,255,0.08);border-radius:99px;overflow:hidden;margin:8px 0}
+.conf-fill{height:100%;transition:width 0.6s, background 0.6s}
+.fab{position:fixed;right:14px;bottom:18px;display:flex;flex-direction:column;gap:10px;z-index:99}
+.fab button{width:54px;height:54px;border-radius:50%;backdrop-filter:blur(12px);font-size:20px;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
 </style>
 </head>
 <body>
 
 <div id="authCard" class="card">
-<h2>TILISI GOLD BI<br><small style="font-size:11px" id="versionLabel">v14 FREE TRIAL</small></h2>
+<h2><span class="gold">TILISI</span> <span class="sky">GOLD BI</span><br><small style="font-size:11px" id="versionLabel">v15 GLASS FUTURISTIC • Skyblue + Gold + Silver + Black</small></h2>
 <h3 style="margin:0 0 8px">Welcome Back</h3>
 <input id="phone" placeholder="Phone 2547XXXXXXXX" type="tel">
 <input id="pass" type="password" placeholder="Password">
 <button onclick="register()">CREATE ACCOUNT</button>
 <button class="secondary" onclick="login()">SIGN IN</button>
 <p id="authMsg" style="font-size:12px;word-break:break-all;text-align:center;margin-top:10px"></p>
-<small style="display:block;text-align:center;margin-top:8px">3 free logins. No payment needed today.</small>
+<small style="display:block;text-align:center;margin-top:8px">3 free logins. Glass UI - Fits Android</small>
 </div>
 
 <!-- PAYWALL - ONLY SHOWS ON 4TH LOGIN -->
@@ -49,7 +63,6 @@ h2{margin:10px 0 16px;text-align:center;line-height:1.2}
 <h3 style="margin:0 0 8px">Subscription Required</h3>
 <p style="font-size:14px">You used <span class="gold" id="loginCount">3</span>/3 free logins.</p>
 <p style="font-size:13px">Status: <span id="subStatus" class="gold">EXPIRED</span></p>
-
 <div class="paybox" id="stkBox">
 <p style="font-size:14px;margin:0"><b>🔒 Pay to Continue</b></p>
 <p style="font-size:13px;margin:8px 0">Choose plan, STK will pop on your phone:</p>
@@ -58,10 +71,8 @@ h2{margin:10px 0 16px;text-align:center;line-height:1.2}
 <button style="background:#FFD700;color:#000" onclick="paySTK(799)">Weekly 799<br><small>Most Popular</small></button>
 </div>
 <button style="background:#fff;color:#000" onclick="paySTK(1999)">Monthly 1999 - 30 Days Best Value</button>
-<p style="font-size:11px;margin-top:10px" id="stkStatus">STK coming soon - Free mode active for now. Click to simulate.</p>
+<p style="font-size:11px;margin-top:10px" id="stkStatus">FREE MODE ACTIVE - Click to continue free until Daraja fixed</p>
 </div>
-
-<button class="green hidden" id="iPaidBtn" onclick="iHavePaid()">✅ I HAVE PAID - CHECK NOW</button>
 <div id="payStatus" style="margin-top:10px;font-weight:bold;font-size:13px;text-align:center;min-height:20px"></div>
 <p id="payMsg" style="font-size:12px;word-break:break-all"></p>
 <button class="secondary" onclick="logout()">Logout</button>
@@ -74,144 +85,142 @@ h2{margin:10px 0 16px;text-align:center;line-height:1.2}
 <button style="width:auto;padding:6px 12px;font-size:11px" class="secondary" onclick="logout()">Logout</button>
 </div>
 <div id="engine" class="engine engine-SCANNING">SCANNING...</div>
-<div style="display:flex;justify-content:space-between;margin-top:12px"><span>XAUUSD</span><span class="gold" id="gold">--</span></div>
+<div style="display:flex;justify-content:space-between;margin-top:12px"><span class="silver">XAUUSD</span><span class="gold" id="gold">--</span></div>
 <div style="font-size:11px;margin:6px 0" id="boslevel">--</div>
 <div id="signal" class="signal WAIT">WAIT</div>
 <div style="text-align:center;font-size:12px;line-height:1.6">Conf <b id="conf">0%</b> | <b id="stage">--</b> | <b id="regime">--</b><br>DXY <b id="dxy">--</b> | <b id="time">--</b></div>
+<div class="conf-bar"><div class="conf-fill" id="confFill" style="width:0%;background:var(--amber)"></div></div>
+<!-- BULL BEAR STRENGTH -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+<div style="padding:8px;border-radius:12px;background:rgba(0,255,136,0.08);border:1px solid rgba(0,255,136,0.18);text-align:center"><small>BULL</small><br><b id="bullScore" style="color:var(--green)">0%</b><div class="conf-bar"><div class="conf-fill" id="bullFill" style="width:0%;background:var(--green)"></div></div></div>
+<div style="padding:8px;border-radius:12px;background:rgba(255,59,48,0.08);border:1px solid rgba(255,59,48,0.18);text-align:center"><small>BEAR</small><br><b id="bearScore" style="color:var(--red)">0%</b><div class="conf-bar"><div class="conf-fill" id="bearFill" style="width:0%;background:var(--red)"></div></div></div>
+</div>
+<!-- BUY/WAIT/SELL -> MT5 -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
+<button style="background:linear-gradient(180deg,#00FF88,#00CC6A);color:#000;font-weight:900" onclick="openMT5('buy')">BUY</button>
+<button style="background:rgba(42,47,63,0.9);color:var(--amber);border:1px solid rgba(255,195,0,0.3);font-weight:900" onclick="openMT5('wait')">WAIT</button>
+<button style="background:linear-gradient(180deg,#FF5A5A,#D93030);color:#fff;font-weight:900" onclick="openMT5('sell')">SELL</button>
+</div>
+<small style="display:block;text-align:center;margin-top:6px">Tap to open MT5 app</small>
 </div>
 
-<div id="gatesCard" class="card hidden"><b style="font-size:12px">7 VALIDATORS</b><div id="gates" style="margin-top:8px"></div></div>
-<div id="aiCard" class="card hidden"><b style="font-size:12px">AI ANALYST</b><div id="ai" style="font-size:12px;margin-top:8px;line-height:1.5;opacity:0.9"></div><div id="inval" style="font-size:11px;margin-top:8px;color:#ff8c8c"></div></div>
+<div id="gatesCard" class="card hidden"><b style="font-size:12px;color:var(--sky)">7 VALIDATORS - Always Visible</b><br><small>Red=Weak Amber=Medium Green=Strong • Strength for all gates even in WAIT</small><div id="gates" style="margin-top:8px"></div></div>
+<div id="aiCard" class="card hidden"><b style="font-size:12px;color:var(--gold)">AI ANALYST</b><div id="ai" style="font-size:12px;margin-top:8px;line-height:1.5;opacity:0.9"></div><div id="inval" style="font-size:11px;margin-top:8px;color:#ff8c8c"></div></div>
+
+<!-- PRICE ALERTS + MT5 -->
+<div class="fab">
+<button style="background:rgba(0,212,255,0.18);border:1px solid var(--sky);color:var(--sky)" onclick="setAlert()" title="Price Alerts">🔔</button>
+<button style="background:rgba(255,215,0,0.18);border:1px solid var(--gold);color:var(--gold)" onclick="openMT5('open')" title="Open MT5">📈</button>
+</div>
 
 <script>
 const API = location.origin;
 let token = localStorage.getItem('tilisi_token');
+let lastPrice = 0;
 const $ = id => document.getElementById(id);
 const show = (id, yes) => $(id).classList.toggle('hidden', !yes);
 
+function openMT5(side){
+ const store='https://play.google.com/store/apps/details?id=net.metaquotes.metatrader5';
+ try{ window.location.href='metatrader5://'; }catch(e){}
+ setTimeout(()=>{ window.open(store,'_blank'); },700);
+}
+function setAlert(){
+ const p=prompt('Set price alert (e.g. 3514):'); if(!p) return;
+ localStorage.setItem('tilisi_alert_price',p);
+ if('Notification' in window) Notification.requestPermission();
+ alert('Alert set at $'+p);
+}
 function phoneEl(){return $('phone').value.trim()}
 function passEl(){return $('pass').value.trim()}
 
 async function register(){
  $('authMsg').innerText='Creating account...';
  let r=await fetch(API+'/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
- let d=await r.json(); 
- $('authMsg').innerText=d.message||JSON.stringify(d);
- if(d.token){
-   token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone);
-   handleLoginSuccess(d);
- }
+ let d=await r.json(); $('authMsg').innerText=d.message||JSON.stringify(d);
+ if(d.token){ token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone); handleLoginSuccess(d); }
 }
 async function login(){
  $('authMsg').innerText='Signing in...';
  let r=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone:phoneEl(),password:passEl()})});
  let d=await r.json();
- if(r.status===402 && d.need_payment){
-   // 4th login - BLOCK
-   token=d.token; localStorage.setItem('tilisi_token',token);
-   showPaywall(d);
-   return;
- }
- if(d.token){
-   token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone);
-   handleLoginSuccess(d);
- } else {
-   $('authMsg').innerText=d.error||JSON.stringify(d);
- }
+ if(r.status===402 && d.need_payment){ token=d.token; localStorage.setItem('tilisi_token',token); showPaywall(d); return; }
+ if(d.token){ token=d.token; localStorage.setItem('tilisi_token',token); localStorage.setItem('tilisi_phone', d.phone); handleLoginSuccess(d); }
+ else { $('authMsg').innerText=d.error||JSON.stringify(d); }
 }
-
 function handleLoginSuccess(d){
- show('authCard', false);
- show('payCard', false);
- show('engineCard', true);
- show('gatesCard', true);
- show('aiCard', true);
+ show('authCard', false); show('payCard', false); show('engineCard', true); show('gatesCard', true); show('aiCard', true);
  $('loginBadge').innerText = `Login ${d.login_count||1}/3`;
- if(d.free_mode){
-   $('freeBadge').innerText = `FREE TRIAL - Login ${d.login_count||1}/3`;
-   $('freeBadge').className='badge badge-free';
- } else {
-   $('freeBadge').innerText = d.subscription_active ? 'ACTIVE' : `FREE ${d.login_count}/3`;
- }
- refresh(); setInterval(refresh,10000);
+ if(d.free_mode){ $('freeBadge').innerText = `FREE - ${d.login_count||1}/3`; $('freeBadge').className='badge badge-free'; }
+ else { $('freeBadge').innerText = d.subscription_active ? 'ACTIVE' : `FREE ${d.login_count||1}/3`; }
+ if(window.iv) clearInterval(window.iv); refresh(); window.iv=setInterval(refresh,5000);
 }
-
 function showPaywall(d){
- show('authCard', false);
- show('engineCard', false);
- show('gatesCard', false);
- show('aiCard', false);
- show('payCard', true);
+ show('authCard', false); show('engineCard', false); show('gatesCard', false); show('aiCard', false); show('payCard', true);
  $('loginCount').innerText = d.login_count||4;
- $('subStatus').innerText = d.message||'Free trials ended - Pay to continue';
- $('payStatus').innerText = d.free_mode ? 'FREE MODE ACTIVE - You can still use app for now' : 'Pay to unlock';
- if(d.free_mode){
-   // In free mode, allow bypass - show button to continue free
-   $('payStatus').innerHTML = 'FREE MODE ACTIVE - <a href="#" onclick="bypassFree()" style="color:#FFD700">Continue to App Free →</a>';
- }
+ $('subStatus').innerText = d.message||'Free trials ended';
+ $('payStatus').innerHTML = d.free_mode ? 'FREE MODE - <a href="#" onclick="bypassFree()" style="color:var(--gold)">Continue to App Free →</a>' : 'Pay to unlock';
 }
-
-function bypassFree(){
- show('payCard', false);
- show('engineCard', true);
- show('gatesCard', true);
- show('aiCard', true);
- refresh();
-}
-
-async function paySTK(amount){
- $('stkStatus').innerText = `Initiating STK for KSH ${amount}... (Daraja fixing)`;
- // When Daraja fixed, call /api/pay/stk here
- setTimeout(()=>{ $('stkStatus').innerText = `FREE MODE: No payment needed yet. Enjoy! Login will still count.`; },1500);
-}
-
-async function iHavePaid(){
- let phone = localStorage.getItem('tilisi_phone') || phoneEl();
- phone = phone.replace("+","").replace(" ","");
- if(phone.startsWith("0")) phone = "254"+phone.slice(1);
- const r = await fetch(API+`/api/notifications/latest?phone=${phone}`);
- const d = await r.json();
- if(d.active){ alert('Active!'); handleLoginSuccess(d); } else { alert('Not found yet'); }
-}
+function bypassFree(){ show('payCard', false); show('engineCard', true); show('gatesCard', true); show('aiCard', true); refresh(); }
+async function paySTK(amount){ $('stkStatus').innerText=`STK KSH ${amount} - Free mode, no charge...`; setTimeout(bypassFree,800); }
 
 async function refresh(){
  try{
   let r=await fetch(API+'/api/dashboard',{headers:{'Authorization':'Bearer '+token}});
-  if(r.status===402){
-    let d=await r.json();
-    if(d.need_payment){ showPaywall(d); return; }
-  }
-  let d=await r.json();
-  if(d.error) return;
-  $('gold').innerText='$'+d.gold;
+  if(r.status===402){ let d=await r.json(); if(d.need_payment){ showPaywall(d); return; } }
+  let d=await r.json(); if(d.error) return;
+
+  // PRICE MOVEMENT RED->GREEN
+  const price=d.gold;
+  const goldEl=$('gold');
+  goldEl.innerText='$'+price;
+  if(lastPrice){ if(price>lastPrice) goldEl.className='gold price-up'; else if(price<lastPrice) goldEl.className='gold price-down'; }
+  lastPrice=price;
+  // Alert
+  const ap=parseFloat(localStorage.getItem('tilisi_alert_price')||'0');
+  if(ap && Math.abs(price-ap)<2){ if('Notification' in window && Notification.permission==='granted'){ new Notification(`Tilisi: Gold $${price} hit $${ap}`); } localStorage.removeItem('tilisi_alert_price'); }
+
   $('engine').innerText=d.engine_status+' | '+d.engine_note;
   $('engine').className='engine '+(d.bos_up?'engine-ACTIVE':'engine-SCANNING');
   $('boslevel').innerText='Asia '+d.bos_levels.low+' - '+d.bos_levels.high+' | BUY>'+d.bos_levels.buy_trigger+' SELL<'+d.bos_levels.sell_trigger;
   $('signal').innerText=d.signal + (d.confidence? ' '+d.confidence+'%':'');
   $('signal').className='signal '+d.signal;
   $('conf').innerText=d.confidence+'%';
-  $('stage').innerText=d.notify_stage;
+  $('stage').innerText=d.notify_stage||d.engine_status;
   $('regime').innerText=d.regime;
   $('dxy').innerText=d.dxy;
   $('time').innerText=d.timestamp;
   $('ai').innerText=d.ai_analyst;
   $('inval').innerText=d.invalidation;
-  let hg=''; for(let k in d.gates){let g=d.gates[k]; hg+=`<div class="gate"><span><b>${k}</b> <small>${g.note} (${g.weight*100}%)</small></span><span style="color:${g.buy_status=='PASS'?'#00ff88':g.buy_status=='FAIL'?'#ff3b3b':'#ffcc00'}">${g.buy_status}</span><span style="color:${g.sell_status=='PASS'?'#00ff88':g.sell_status=='FAIL'?'#ff3b3b':'#ffcc00'}">${g.sell_status}</span></div>`}
-  $('gates').innerHTML=hg||'ENGINE IDLE';
+
+  // Conf bar + Bull/Bear strength Red Amber Green
+  const conf=d.confidence||0;
+  const cf=$('confFill'); if(cf){ cf.style.width=conf+'%'; if(conf>=70) cf.style.background='var(--green)'; else if(conf>=40) cf.style.background='var(--amber)'; else cf.style.background='var(--red)'; }
+  const bull=Math.round((d.score_buy||0)*100), bear=Math.round((d.score_sell||0)*100);
+  $('bullScore').innerText=bull+'%'; $('bullFill').style.width=bull+'%';
+  $('bearScore').innerText=bear+'%'; $('bearFill').style.width=bear+'%';
+
+  // 7 VALIDATORS ALWAYS VISIBLE EVEN IN WAIT
+  let hg=''; 
+  if(d.gates && Object.keys(d.gates).length>0){
+    for(let k in d.gates){let g=d.gates[k];
+      let buy=g.buy_status, sell=g.sell_status;
+      let dotB=buy==='PASS'?'green':buy==='FAIL'?'red':'amber';
+      let dotS=sell==='PASS'?'green':sell==='FAIL'?'red':'amber';
+      hg+=`<div class="gate"><span><b>${k}</b> <small>${g.note} (${(g.weight*100).toFixed(0)}%)</small><br><span class="dot ${dotB}"></span> <small>BUY ${buy}</small> &nbsp; <span class="dot ${dotS}"></span> <small>SELL ${sell}</small></span><span style="color:${buy==='PASS'?'var(--green)':buy==='FAIL'?'var(--red)':'var(--amber)'}">${buy}</span><span style="color:${sell==='PASS'?'var(--green)':sell==='FAIL'?'var(--red)':'var(--amber)'}">${sell}</span></div>`;
+    }
+  } else {
+    hg='<div class="gate"><span><b>SCANNING</b> <small>Asia range not broken - validators in WAIT (Amber = scanning)</small><br><span class="dot amber"></span> <small>WAIT</small></span><span style="color:var(--amber)">WAIT</span><span style="color:var(--amber)">WAIT</span></div>';
+  }
+  $('gates').innerHTML=hg;
  }catch(e){console.log(e)}
 }
-
-function logout(){
- localStorage.removeItem('tilisi_token'); localStorage.removeItem('tilisi_phone');
- location.reload();
-}
-
+function logout(){ localStorage.removeItem('tilisi_token'); localStorage.removeItem('tilisi_phone'); location.reload(); }
 if(token){
  $('authMsg').innerText='Auto login...';
  fetch(API+'/api/my-subscription',{headers:{'Authorization':'Bearer '+token}})
- .then(r=>r.json()).then(d=>{
-   if(d.active || d.free_mode || (d.login_count||0)<=3){ handleLoginSuccess(d); } else { showPaywall(d); }
- }).catch(()=>{ show('authCard',true); });
+ .then(r=>r.json()).then(d=>{ if(d.active || d.free_mode || (d.login_count||0)<=3){ handleLoginSuccess(d); } else { showPaywall(d); } })
+ .catch(()=>{ show('authCard',true); });
 }
 </script>
 </body>
